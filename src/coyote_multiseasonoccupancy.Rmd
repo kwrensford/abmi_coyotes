@@ -1,0 +1,474 @@
+---
+title: "Multi-Season Occupancy"
+author: "Kwasi Wrensford"
+date: "2024-12-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(hms)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(spOccupancy)
+library(stars)
+library(sf)
+library(terra)
+set.seed(1996)
+```
+
+
+
+#Building a multiseason model for Alberta coyotes
+
+##Loading in and cleaning data
+
+Start by loading in camera data (should already have data downloaded locally and stored in gitignore)
+
+```{r}
+# Camera Reports
+cameras<-unique(study_main_reports$location)
+
+all_main_reports <- vroom::vroom("data/ABMI EH 2014-2019 Main Reports.csv")
+all_image_reports <- vroom::vroom("data/ABMI EH 2014-2019 Image Reports.csv")
+
+head(all_main_reports)
+head(all_image_reports)
+
+##Create column for year of report
+all_main_reports$year <- lubridate::year(all_main_reports$image_date_time)
+all_image_reports$year <- lubridate::year(all_image_reports$image_date_time)
+
+##Filter reports to 2015-2019 range
+study_image_reports<-all_image_reports %>%
+  filter(year > 2014 & year < 2020)
+
+study_main_reports<-all_main_reports %>%
+  filter(year > 2014 & year < 2020)
+
+sort(unique(all_main_reports$species_common_name))
+
+##Use image reports file to extract camera operation dates for each location
+camera_operation_dates_v2<-study_image_reports %>%
+  group_by(year, project_id, location) %>%
+  summarize(
+    start_date_time = min(image_date_time),
+    end_date_time = max(image_date_time)
+  )
+
+camera_operation_dates_v2$start_date_time<-lubridate::as_date(camera_operation_dates_v2$start_date_time)
+camera_operation_dates_v2$end_date_time<-lubridate::as_date(camera_operation_dates_v2$end_date_time)
+```
+
+
+##Simulated data approach to troubleshoot building model
+Simulate a dataset for troubleshooting code.
+```{r}
+n_sites <- 10
+n_seasons <- 5
+n_surveys <- 25 #In the real model this will be days
+
+#Simulateed site locations
+site_data <- data.frame(
+  site = 1:n_sites,
+  latitude = runif(n_sites, 35, 45),
+  longitude = (runif(n_sites, -110, -100))
+)
+```
+
+```{r}
+site_sf <- st_as_sf(site_data, coords = c("longitude", "latitude"), crs = 4326)
+site_sf_utm <- st_transform(site_sf, crs = 32613)  # UTM Zone 13N
+site_data$utm_easting <- st_coordinates(site_sf_utm)[, 1]
+site_data$utm_northing <- st_coordinates(site_sf_utm)[, 2]
+```
+
+```{r}
+site_data$human_footprint <- runif(n_sites, 0, 100)  # Human footprint index (0-100 scale)
+site_data$winter_intensity <- rnorm(n_sites, mean = -10, sd = 5)  # Avg winter temp (°C)
+```
+
+Simulate occupancy
+```{r}
+occ_prob <- plogis(0.5 + 0.1 * site_data$human_footprint - 0.2 * site_data$winter_intensity)
+
+z <- matrix(rbinom(n_sites * n_seasons, 1, occ_prob), nrow = n_sites, ncol = n_seasons)
+```
+
+Simulate detection
+```{r}
+effort <- array(runif(n_sites * n_surveys * n_seasons, 1, 10), dim = c(n_sites, n_surveys, n_seasons))
+
+det_prob <- plogis(-0.5 + 0.2 * effort)
+
+# Simulate "Day of Survey" (random survey day within a season)
+set.seed(123) 
+day <- array(sample(1:30, n_sites * n_surveys * n_seasons, replace = TRUE), 
+             dim = c(n_sites, n_surveys, n_seasons))
+# Simulate "Time of Day" (e.g., morning = 0, evening = 1)
+tod <- array(sample(0:1, n_sites * n_surveys * n_seasons, replace = TRUE), 
+             dim = c(n_sites, n_surveys, n_seasons))
+
+det.covs = list(
+    day = day,
+    tod = tod
+   )
+
+y <- array(0, dim = c(n_sites, n_surveys, n_seasons))# Initialize with 0
+
+for (i in 1:n_sites) {
+  for (j in 1:n_seasons) {
+    for (k in 1:n_surveys) {
+      y[i, k, j] <- rbinom(1, 1, det_prob[i, k, j] * z[i, j])  # Detection only if species is present
+    }
+  }
+}
+```
+
+```{r}
+occ_data <-list(
+  y = y,
+  occ.covs = site_data[, c("latitude", "human_footprint", "winter_intensity")],
+  det.covs = det.covs,
+  coords = as.matrix(site_data[,c("utm_easting", "utm_northing")])
+)
+```
+
+Simple model to start
+```{r}
+model <- tPGOcc(
+  occ.formula = ~ latitude + human_footprint + winter_intensity,  # Include environmental covariates
+  det.formula = ~ day + tod,  # Detection model: depends on effort
+  data = occ_data,
+  n.batch = 1000,
+  batch.length = 25,
+  n.burn = 500,
+  n.thin = 1,
+  n.chains = 3
+)
+
+# Model summary
+summary(model)
+```
+
+Define covariate formulas
+```{r}
+occ.formula <- ~year + latitude + human_footprint + winter_intensity
+det.formula <- ~day + tod
+```
+
+Set initial values
+```{r}
+```
+
+Set priors
+```{r}
+```
+
+Fit model
+```{r}
+model <- tPGOcc(
+  occ.formula = ~ latitude + human_footprint + winter_intensity,  # Include environmental covariates
+  det.formula = ~ day + tod,  # Detection model: depends on effort
+  data = occ_data,
+  n.batch = 1000,
+  batch.length = 25,
+  n.burn = 500,
+  n.thin = 1,
+  n.chains = 3
+)
+
+# Model summary
+summary(model)
+```
+
+
+##Real Data
+Format data for spOccupancy, build 3 dimensional array of detections with site, primary time period (years), secondary time period (days)
+
+```{r}
+coyotes <- carnivores %>%
+  filter(species_common_name == "Coyote")
+coyote
+coyotes$image_date <- date(coyotes$image_date_time)
+coyotes$image_time <- as_hms(coyotes$image_date_time)
+coyotes.long <- coyotes %>%
+  group_by(location, year, image_date) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  glimpse()
+```
+
+```{r}
+detection_history <- coyotes %>%
+  group_by(location, year, image_date) %>%
+  summarise(detection = 1, .groups = "drop") %>%
+  complete(location, year, image_date, fill = list(detection = 0))
+```
+
+```{r}
+location_list <- study_main_reports %>%
+  distinct(location) %>%
+  arrange(location)
+
+year_list <- unique(coyotes$year)
+
+detection_array <- detection_history %>%
+  pivot_wider(names_from = image_date, values_from = detection, values_fill = 0) %>%
+  select(-year) %>%
+  as.matrix ()
+
+num_locations <- length(location_list)
+num_days <-ncol(detection_array)
+num_years<-length(year_list)
+detection_3d <-array(
+  as.numeric(detection_array[, -1]),
+  dim = c(num_locations, num_days, num_years),
+  dimnames = list(location = location_list, day = 1:num_days, year = year_list)
+)
+```
+
+##Covariates
+
+###Coordinates
+
+extract coordinates for all cam locations (will need to do this with unbuffered coordinates)
+
+```{r}
+cam.coordinates<-study_main_reports%>%
+  select(location, latitude, longitude)%>%
+  distinct(location, .keep_all = TRUE)
+
+colnames(cam.coordinates) <- c("Location", "Latitude", "Longitude")
+cam.coordinates<-as.data.frame(cam.coordinates)
+
+cam.coordinates.11n <- cam.coordinates %>%
+  filter(Longitude >= -120 & Longitude < -114)
+
+cam.coordinates.12n <- cam.coordinates %>%
+  filter(Longitude >= -114 & Longitude < -108)
+```
+
+convert to decimal coordinates to UTM for use in spOccupancy
+
+```{r}
+cam.coordinates.sf.11n <- st_as_sf(cam.coordinates.11n, coords = c("Longitude", "Latitude"), crs = 4326)
+print(cam.coordinates.sf.11n)
+
+cam.coordinates.sf.12n <- st_as_sf(cam.coordinates.12n, coords = c("Longitude", "Latitude"), crs = 4326)
+print(cam.coordinates.sf.12n)
+```
+
+Convert to UTC (Split into two regions since Alberta straddles two UTC zones)
+
+```{r}
+#UTM zone 11n
+cam.coordinates.11n.utm <- st_transform(cam.coordinates.sf.11n, crs = 32611)
+
+#UTM zone 12n
+cam.coordinates.12n.utm <- st_transform(cam.coordinates.sf.12n, crs = 32612)
+
+```
+
+Extract the UTM coordinates, and recombine to get a single dataframe containing location, lat, long, easting(x), and northing(y)
+
+```{r}
+utm.11n.coordinates <- st_coordinates(cam.coordinates.11n.utm)
+utm.12n.coordinates <- st_coordinates(cam.coordinates.12n.utm)
+
+# Recombine utm datasets
+cam.coordinates.11n.combined<-cbind(cam.coordinates.11n, utm.11n.coordinates)
+cam.coordinates.12n.combined<-cbind(cam.coordinates.12n, utm.12n.coordinates)
+
+cam.coordinates.utm <- rbind(cam.coordinates.11n.combined, cam.coordinates.12n.combined)
+utm.coordinates <- cam.coordinates.utm %>%
+  arrange(Location) %>%
+  select(X, Y)
+```
+
+###Latitude
+
+```{r}
+cam.latitude <- study_main_reports %>%
+  select(location, latitude) %>%
+  distinct(location, .keep_all = TRUE)
+
+cam.latitude.occ<-cam.latitude %>%
+  arrange(location) %>%
+  select(latitude)
+```
+
+###Camera Effort (Detection covariate)
+
+
+
+###Climate
+
+```{r}
+
+```
+
+###Human Footprint
+
+```{r}
+
+```
+
+###Habitat Characteristics
+
+```{r}
+```
+
+##Package covariates and occupancy data together into list object
+
+```{r}
+occ_covs <- array(
+  cam.latitude.occ
+)
+occ_data <- list(
+  y = detection_3d,
+  occ.covs = latitude,
+  det.covs = 
+  coords = utm.coordinates
+)
+```
+
+##Fit occupancy model for coyote data
+
+Dry run of simple model
+```{r}
+model.test <- stPGOcc(
+  occ.formula = ~ Latitude,
+  det.formula = ~ effort,
+  data = occ_data,
+  n.batch = 1000,
+  bath.length = 25,
+  n.buurn = 500,
+  n.thin - 1,
+  n.chains = 3
+)
+```
+Define occupancy formula and detection formula
+
+```{r}
+coyote.sp.occ.formula <-  ~scale(year) + scale(lat)
+coyote.sp.det.formula <- scale(day) + I(scale(day)^2 + scale(tod))
+```
+
+Specify initial values for all model parameters
+
+```{r}
+z.inits <- apply(coyote.data, c(1, 2), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
+
+dist.hbef <- dist(coyote.data$coords)
+coyote.sp.inits <- list(beta = 0, 
+                        alpha = 0,  sigma.sq.psi = 1,
+                        z = z.inits)
+```
+
+Specify priors
+
+```{r}
+coyote.sp.priors <- list(beta.normal = list(mean = 0, var = 2.72), 
+                        alpha.normal = list(mean = 0, var = 2.72), 
+                        sigma.sq.psi.ig = list(a = 0.1, b = 0.1))
+```
+
+Below, using the camtrapR package, we create a matrix of detection histories that can be used in an occupancy model object
+
+```{r}
+# camtrapR occupancy modeling workflow
+
+##Camera operation matrix
+camera_operation_dates_filtered<-camera_operation_dates_v2%>%
+  filter(!is.na(start_date_time))
+
+camera_operation_dates_filtered<-camera_operation_dates_filtered%>%
+  mutate(start_date_time = as.character(start_date_time))%>%
+  mutate(end_date_time = as.character(end_date_time))
+
+##Start and end dates for deployments per year
+camera_deployment_dates<-camera_operation_dates_filtered %>%
+  group_by(location, year)%>%
+  summarize(
+    start_date_time = min(start_date_time),
+    end_date_time = max (end_date_time),
+    .groups = "drop"
+  )
+
+##Idenitfy gaps or periods of inactivity within a camera's deployment "problems"
+problem_matrix <-camera_operation_dates_filtered%>%
+  arrange(location, year, start_date_time)%>%
+  group_by(location, year)%>%
+  mutate(
+    Problem1_from = lag(end_date_time) + 1,
+    Problem1_to = start_date_time -1
+  ) %>%
+  filter(!is.na(Problem1_from)& Problem1_from <= Problem1_to)%>%
+  select(location, year, Problem1_from, Problem1_to)
+
+##Combine problems with deployment data
+camera_deployment_problems<-camera_deployment_dates%>%
+  left_join(problem_matrix, by = c("location", "year"))%>%
+              arrange(location, year, start_date_time, Problem1_from)
+
+##Convert dates to character to be compatible with camptrapR
+camera_deployment_problems<-camera_deployment_problems%>%
+  mutate(start_date_time = as.character(start_date_time))%>%
+  mutate(end_date_time = as.character(end_date_time))
+
+##Filter cameras where start and end time are identical
+camera_deployment_problems<-camera_deployment_problems%>%
+  filter(start_date_time != end_date_time)
+
+#Build a camera operation matrix to fill with detections
+camera_operation_matrix<-cameraOperation(camera_deployment_problems,
+                                         stationCol = "location",
+                                         sessionCol = "year",
+                                         setupCol = "start_date_time",
+                                         retrievalCol = "end_date_time",
+                                         writecsv = FALSE,
+                                         hasProblems = TRUE,
+                                         dateFormat = "ymd_HMS"
+                                         )
+##Camera detection history
+datetime_check<-as.POSIXct(study_main_reports$image_date_time, format = ymd_HMS)
+invalid_entries<-study_main_reports[is.na(datetime_check),]
+invalid_entries
+
+###Daylight savings time!! 4 coyote observations fall in the DST hour, so shifting to 3:00 to compensate (I'll figure out a more elegant way to do this later)
+
+##entries 255396,255397,1882366,7326233
+
+study_main_reports[255396,9] <- as.POSIXct("2015-03-08 3:03:29", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+study_main_reports[255397,9]<- as.POSIXct("2015-03-08 3:03:49", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+study_main_reports[1882366,9]<- as.POSIXct("2015-03-08 3:00:01", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+study_main_reports[7326233,9]<- as.POSIXct("2018-03-11 3:15:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+
+coyotedetectionhistory<-detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Coyote",
+                                         occasionLength = 1,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+coyotedetections<-coyotedetectionhistory$detection_history
+```

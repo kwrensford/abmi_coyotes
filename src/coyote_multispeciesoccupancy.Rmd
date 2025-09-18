@@ -1,0 +1,375 @@
+---
+title: "coyote_multispeciesoccupancy"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(MASS)
+library(hms)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(stars)
+library(sf)
+library(terra)
+library(rstan)
+library(cmdstanr)
+library(rjags)
+library(Rcpp)
+```
+
+#Simulate data for testing model
+
+# R: simulate multispecies occupancy (simple multinomial-logit state parameterisation)
+
+```{r}
+simulate_ms_occ <- function(N = 200, K = 6, S = 3,
+                            p_det = c(0.25, 0.2, 0.15), # detection per species
+                            det_beta_effort = rep(0.3, S)) {
+  set.seed(42)
+
+  # site covariates
+  clim <- scale(rnorm(N, mean = 0, sd = 1))[,1]
+  hf   <- scale(runif(N, -1, 1))[,1]
+
+  # all possible occupancy states (2^S combinations)
+  states <- expand.grid(replicate(S, 0:1, simplify = FALSE))
+  states <- as.matrix(states) # rows = states, cols = species
+  nstates <- nrow(states)
+
+  # baseline intercept for each state
+  state_intercept <- rep(-2, nstates)
+  # single-species states more probable
+  for (i in 1:S) {
+    sing_state_i <- which(rowSums(states)==1 & states[,i]==1)
+    state_intercept[sing_state_i] <- -0.5
+  }
+  # example: make co-occurrence of sp1 & sp2 more likely
+  pair12 <- which(states[,1]==1 & states[,2]==1 & rowSums(states)==2)
+  state_intercept[pair12] <- -0.2
+
+  # storage for linear predictors
+  lp <- matrix(NA, nrow = N, ncol = nstates)
+
+  # loop over states and sites
+  for (s in 1:nstates) {
+    for (i in 1:N) {
+      alpha0 <- -0.3
+      alpha_clim <- 0.6
+      alpha_hf <- -0.4
+
+      # species-level contribution for site i
+      per_sp_contrib <- states[s, ] * (alpha0 + alpha_clim*clim[i] + alpha_hf*hf[i])
+
+      # total linear predictor
+      lp[i, s] <- state_intercept[s] + sum(per_sp_contrib)
+    }
+  }
+
+  # convert to probabilities via softmax
+  exp_lp <- exp(lp)
+  prob_state <- exp_lp / rowSums(exp_lp)
+
+  # sample latent state per site
+  latent_state_idx <- apply(prob_state, 1, function(p) {
+    which(rmultinom(1, 1, prob = p) == 1)
+  })
+  latent_matrix <- states[latent_state_idx, ] # N x S matrix (z)
+
+  # simulate detection histories
+  y <- array(0, dim = c(N, K, S))
+  for (i in 1:N) {
+    for (sp in 1:S) {
+      z <- latent_matrix[i, sp]
+      for (k in 1:K) {
+        effort <- rnorm(1, 0, 1)
+        p <- plogis(qlogis(p_det[sp]) + det_beta_effort[sp] * effort)
+        y[i, k, sp] <- rbinom(1, 1, prob = z * p)
+      }
+    }
+  }
+
+  list(
+    y = y, 
+    site_covs = data.frame(clim = clim, hf = hf),
+    z = latent_matrix,
+    prob_state = prob_state,
+    states = states
+  )
+}
+
+# quick test
+sim <- simulate_ms_occ(N = 200, K = 6, S = 3)
+str(sim)
+
+```
+
+```{r}
+library(unmarked)
+
+# --- simulate data ---
+sim <- simulate_ms_occ(N = 50, K = 4, S = 3)
+
+# detection history: make sure each matrix is N x K
+dets_list <- lapply(1:dim(sim$y)[3], function(sp) sim$y[,,sp])
+
+# give species names so unmarked knows what’s what
+names(dets_list) <- paste0("sp", 1:length(dets_list))
+
+# site covariates must be a data.frame with N rows
+head(sim$site_covs)
+
+# --- build unmarkedMultFrame correctly ---
+umf <- unmarkedMultFrame(
+  ylist   = dets_list,
+  siteCovs = sim$site_covs
+)
+
+# --- specify formulas ---
+occFormulas <- list(
+  ~ clim + hf,  # species 1
+  ~ clim + hf,  # species 2
+  ~ clim + hf   # species 3
+)
+
+detFormulas <- list(
+  ~ 1,  # species 1 detection
+  ~ 1,  # species 2 detection
+  ~ 1   # species 3 detection
+)
+
+# --- fit the model ---
+fm <- occuMulti(detformulas = detFormulas,
+                stateformulas = occFormulas,
+                data = umf)
+
+summary(fm)
+
+```
+
+```{r}
+library(unmarked)
+
+# --- simulate data ---
+sim <- simulate_ms_occ(N = 50, K = 4, S = 3)
+
+# detection history list (N x K matrices, one per species)
+dets_list <- lapply(1:dim(sim$y)[3], function(sp) sim$y[,,sp])
+names(dets_list) <- paste0("sp", 1:length(dets_list))
+
+# build unmarkedMultFrame
+umf <- unmarkedMultFrame(
+  ylist   = dets_list,
+  siteCovs = sim$site_covs
+)
+
+# --- specify formulas ---
+# order: sp1, sp2, sp3, sp1&sp2, sp1&sp3, sp2&sp3, sp1&sp2&sp3
+
+stateFormulas <- list(
+  ~ clim + hf,   # species 1
+  ~ clim + hf,   # species 2
+  ~ clim + hf,   # species 3
+  ~ clim + hf,   # sp1 ∧ sp2
+  ~ clim + hf,   # sp1 ∧ sp3
+  ~ clim + hf,   # sp2 ∧ sp3
+  ~ clim + hf    # sp1 ∧ sp2 ∧ sp3
+)
+
+detFormulas <- list(
+  ~ 1,  # species 1 detection
+  ~ 1,  # species 2 detection
+  ~ 1   # species 3 detection
+)
+
+# --- fit the model ---
+fm <- occuMulti(detformulas = detFormulas,
+                stateformulas = stateFormulas,
+                data = umf)
+
+summary(fm)
+
+```
+#Real Data
+
+```{r}
+all_main_reports <- vroom::vroom("data/ABMI EH 2014-2019 Main Reports.csv")
+all_image_reports <- vroom::vroom("data/ABMI EH 2014-2019 Image Reports.csv")
+
+all_main_reports$year <- lubridate::year(all_main_reports$image_date_time)
+all_image_reports$year <- lubridate::year(all_image_reports$image_date_time)
+
+##Filter reports to 2015-2019 range
+study_image_reports<-all_image_reports %>%
+  filter(year > 2014 & year < 2020)
+
+study_main_reports<-all_main_reports %>%
+  filter(year > 2014 & year < 2020)
+
+##Segment Data for each Year
+main_reports_2015<-all_main_reports%>%
+  filter(year==2015)
+
+main_reports_2016<-all_main_reports%>%
+  filter(year==2016)
+
+main_reports_2017<-all_main_reports%>%
+  filter(year==2017)
+
+main_reports_2018<-all_main_reports%>%
+  filter(year==2018)
+
+main_reports_2019<-all_main_reports%>%
+  filter(year==2019)
+
+##Cleanup
+cam_localities <- unique(study_main_reports$location)
+cov_localities <- unique(ehs_humanfootprint_merged$location)
+
+length(cam_localities)
+length(cov_localities)
+
+# identify those sites without covariates and ignore
+sum(cam_localities %in% cov_localities)
+
+# site names with detections but no covariates
+cam_localities[(cam_localities %in% cov_localities) == F]
+
+# site names with covariates but no detections
+cov_localities[(cov_localities %in% cam_localities) == F]
+```
+
+##Detection covariates
+```{r}
+day.time.2015 <- coyotemesos_long %>%
+  group_by(location, image_date_time) %>%
+  summarize(date = unique(image_date))%>%
+  ungroup()%>%
+  glimpse()
+
+coyotemesos_day <- coyotemesos_long$day
+```
+
+##Occurrence covariates
+
+Latitude
+```{r}
+# Latitude
+cam.latitude <- main_reports_2015 %>%
+  select(location, latitude) %>%
+  distinct(location, .keep_all = TRUE)
+
+latitude<-cam.latitude %>%
+  arrange(location) %>%
+  select(latitude)
+```
+
+Site coordinates
+
+extract coordinates for all cam locations (will need to do this with unbuffered coordinates)
+
+```{r}
+cam.coordinates<-main_reports_2015%>%
+  select(location, latitude, longitude)%>%
+  distinct(location, .keep_all = TRUE)
+
+colnames(cam.coordinates) <- c("Location", "Latitude", "Longitude")
+cam.coordinates<-as.data.frame(cam.coordinates)
+
+cam.coordinates.11n <- cam.coordinates %>%
+  filter(Longitude >= -120 & Longitude < -114)
+
+cam.coordinates.12n <- cam.coordinates %>%
+  filter(Longitude >= -114 & Longitude < -108)
+```
+
+convert to decimal coordinates to UTM
+
+```{r}
+cam.coordinates.sf.11n <- st_as_sf(cam.coordinates.11n, coords = c("Longitude", "Latitude"), crs = 4326)
+print(cam.coordinates.sf.11n)
+
+cam.coordinates.sf.12n <- st_as_sf(cam.coordinates.12n, coords = c("Longitude", "Latitude"), crs = 4326)
+print(cam.coordinates.sf.12n)
+```
+
+Convert to UTC (Split into two regions since Alberta straddles two UTC zones)
+
+```{r}
+#UTM zone 11n
+cam.coordinates.11n.utm <- st_transform(cam.coordinates.sf.11n, crs = 32611)
+
+#UTM zone 12n
+cam.coordinates.12n.utm <- st_transform(cam.coordinates.sf.12n, crs = 32612)
+
+```
+
+Extract the UTM coordinates, and recombine to get a single dataframe containing location, lat, long, easting(x), and northing(y)
+
+```{r}
+utm.11n.coordinates <- st_coordinates(cam.coordinates.11n.utm)
+utm.12n.coordinates <- st_coordinates(cam.coordinates.12n.utm)
+
+# Recombine utm datasets
+cam.coordinates.11n.combined<-cbind(cam.coordinates.11n, utm.11n.coordinates)
+cam.coordinates.12n.combined<-cbind(cam.coordinates.12n, utm.12n.coordinates)
+
+cam.coordinates.utm <- rbind(cam.coordinates.11n.combined, cam.coordinates.12n.combined)
+utm.coordinates <- cam.coordinates.utm %>%
+  arrange(Location) %>%
+  select(X, Y)
+```
+
+Site covariates: load in buffered and unbuffered habitat covariate data
+```{r}
+ehs_humanfootprint<-vroom::vroom("data/Point Level Vegetation HF for Kwasi.csv")
+ehs_humanfootprint_buffered<-vroom::vroom("data/150m Buffer Vegetation HF for Kwasi.csv")
+
+##Merge EHS covariate datasets, only the unbuffered dataset has lat long and climate data. 
+
+buffered_renamed <- ehs_humanfootprint_buffered %>%
+  rename_with(~ paste0(.x, "_buf"),
+              .cols = -location)
+
+ehs_humanfootprint_merged <- ehs_humanfootprint %>%
+  left_join(buffered_renamed, by = "location")
+```
+
+
+Package into list object
+```{r}
+det.covs <- coyotemesos_day
+str(det.covs)
+```
+
+```{r}
+occ.covs <- data.frame(latitude)
+str(occ.covs)
+```
+
+```{r}
+data.msom <- list(y = y,
+                  occ.covs = occ.covs,
+                  det.covs = det.covs,
+                  coords = utm.coordinates)
+```
+
+Define formula
+```{r}
+occ.ms.formula <- ~ scale(latitude) + I(scale(latitude)^2)
+det.ms.formula <- ~ scale(day) + I(scale(day)^2)
+str(data.msom)
+```
+
+
+

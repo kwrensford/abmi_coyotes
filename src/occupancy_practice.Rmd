@@ -1,0 +1,217 @@
+---
+title: "Occupancy Modeling examples"
+author: "Kwasi Wrensford"
+date: "2025-03-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(hms)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(spOccupancy)
+library(stars)
+library(sf)
+library(terra)
+library(reshape2)
+library(rstan)
+library(rjags)
+```
+
+#Simple Occupancy Model
+
+##Simulate data
+```{r}
+set.seed(42)
+
+# Number of sites and surveys per site
+n_sites <- 100
+n_surveys <- 50
+
+# Generate site-level covariates
+human_footprint <- rnorm(n_sites, mean = 0, sd = 1)  # Standardized human impact
+winter_severity <- rnorm(n_sites, mean = 0, sd = 1)  # Standardized winter severity
+
+# True occupancy probability
+psi <- plogis(-0.5 + 0.7 * human_footprint - 0.6 * winter_severity)  # Logit-scale
+z <- rbinom(n_sites, size = 1, prob = psi)  # True occupancy states
+
+# Generate survey-level detection covariate
+wind_speed <- matrix(rnorm(n_sites * n_surveys, mean = 0, sd = 1), nrow = n_sites, ncol = n_surveys)
+
+# Detection probability
+p <- plogis(-1 + 0.5 * wind_speed)  # Logit-scale
+
+# Generate detection data
+y <- matrix(0, nrow = n_sites, ncol = n_surveys)
+for (i in 1:n_sites) {
+  for (j in 1:n_surveys) {
+    y[i, j] <- rbinom(1, size = 1, prob = z[i] * p[i, j])
+  }
+}
+
+# Combine data into a data frame
+data <- data.frame(site = 1:n_sites, human_footprint, winter_severity, occupancy = z)
+
+# Convert detection history to long format for unmarked
+library(reshape2)
+y_long <- melt(y)
+colnames(y_long) <- c("site", "survey", "detection")
+
+# Convert wind speed to long format for obsCovs
+wind_speed_long <- melt(wind_speed)
+colnames(wind_speed_long) <- c("site", "survey", "wind_speed")
+
+# Merge detection and wind speed data
+detection_data <- merge(y_long, wind_speed_long, by = c("site", "survey"))
+
+
+```
+
+##Fit model in unmarked
+```{r}
+
+# Convert to unmarkedFrameOccu format
+y_wide <- reshape2::acast(detection_data, site ~ survey, value.var = "detection")
+obsCovs <- reshape2::acast(detection_data, site ~ survey, value.var = "wind_speed")
+
+# Create unmarked data frame
+y_umf <- unmarkedFrameOccu(y = y_wide, siteCovs = data[, c("human_footprint", "winter_severity")], obsCovs = list(wind_speed = obsCovs))
+
+# Fit single-season occupancy model in unmarked
+occu_model <- occu(~ wind_speed ~ human_footprint + winter_severity, data = y_umf)
+summary(occu_model)
+```
+```{r}
+plotEffects(occu_model, "state", "human_footprint")
+```
+##Fit Bayesian model in jags
+```{r}
+# Ensure y is consistent with z
+for (i in 1:n_sites) {
+  if (z[i] == 0) {
+    y[i, ] <- rep(0, n_surveys)  # Set all detections to 0 when unoccupied
+  }
+}
+
+jags_model_code <- "model {
+  # Priors
+  alpha_psi ~ dnorm(0, 0.01)
+  beta_psi1 ~ dnorm(0, 0.01)
+  beta_psi2 ~ dnorm(0, 0.01)
+  alpha_p ~ dnorm(0, 0.01)
+  beta_p ~ dnorm(0, 0.01)
+
+  for (i in 1:n_sites) {
+    # Occupancy model
+    logit(psi[i]) <- alpha_psi + beta_psi1 * human_footprint[i] + beta_psi2 * winter_severity[i]
+    z[i] ~ dbern(psi[i])
+    
+    for (j in 1:n_surveys) {
+      # Detection model
+      logit(p[i, j]) <- alpha_p + beta_p * wind_speed[i, j]
+      y[i, j] ~ dbern(z[i] * p[i, j])
+    }
+  }
+}"
+
+# Save JAGS model
+writeLines(jags_model_code, "occupancy_model.jags")
+
+# Prepare data for JAGS
+jags_data <- list(
+  n_sites = n_sites,
+  n_surveys = n_surveys,
+  y = y,
+  human_footprint = data$human_footprint,
+  winter_severity = data$winter_severity,
+  wind_speed = wind_speed,
+  z = z #Pass z explicitly
+)
+
+# Parameters to monitor
+params <- c("alpha_psi", "beta_psi1", "beta_psi2", "alpha_p", "beta_p")
+
+# Initialize JAGS model
+jags_model <- jags.model("occupancy_model.jags", data = jags_data, n.chains = 3, n.adapt = 500)
+
+# Run MCMC
+update(jags_model, 1000)  # Burn-in
+jags_samples <- coda.samples(jags_model, variable.names = params, n.iter = 5000)
+
+# Print results
+summary(jags_samples)
+
+```
+
+#Multi-season occupancy model w/ extinction/colonization
+```{r}
+library(unmarked)
+library(jagsUI)
+
+# Parameters for simulation
+n_sites <- 100        # Number of sites
+n_seasons <- 5       # Number of seasons
+n_surveys <- 50        # Number of traps per site per season
+
+# Simulate occupancy covariates (human footprint and winter severity)
+human_footprint <- runif(n_sites, 0, 1)  # Random human footprint covariate
+winter_severity <- rnorm(n_sites, 0, 1)  # Winter severity covariate (e.g., snowfall or temp)
+
+# Simulate detection covariate (wind speed)
+wind_speed <- runif(n_surveys * n_seasons * n_sites, 0, 10)  # Wind speed range (0-10 m/s)
+
+# Simulate occupancy state (1 = occupied, 0 = unoccupied) for each site and season
+psi <- matrix(NA, n_sites, n_seasons)
+for (i in 1:n_sites) {
+  for (t in 1:n_seasons) {
+    psi[i, t] <- plogis(0.5 * human_footprint[i] + 0.3 * winter_severity[i] + rnorm(1, 0, 0.2))
+  }
+}
+
+# Simulate detection (y) for each trap, season, and site
+y <- array(NA, dim = c(n_sites, n_seasons, n_surveys))
+for (i in 1:n_sites) {
+  for (t in 1:n_seasons) {
+    for (j in 1:n_surveys) {
+      p <- plogis(0.2 * wind_speed[(i - 1) * n_seasons * n_traps + (t - 1) * n_traps + j])
+      y[i, t, j] <- rbinom(1, size = 1, prob = psi[i, t] * p)
+    }
+  }
+}
+
+# Check the data structure
+head(y[1, , ])  # Detections for the first site
+Step 2: Fitting the Dynamic Occupancy Model with unmarked
+Next, we'll fit the dynamic occupancy model using unmarked. Here's how to set it up:
+
+r
+Copy
+Edit
+# Prepare data for unmarked
+umf <- unmarkedFrameOccu(y = y, siteCovs = data.frame(human_footprint = human_footprint, winter_severity = winter_severity), 
+                          obsCovs = list(wind_speed = wind_speed))
+
+# Fit the dynamic occupancy model
+# Model: psi depends on human footprint and winter severity, p depends on wind speed
+
+model_umf <- occu(~ wind_speed ~ human_footprint + winter_severity, data = umf)
+
+# Summarize the model
+summary(model_umf)
+
+```
+
+#Multi-species w/interactions occupancy model
+
+#Multi-season, multi-species occupancy model

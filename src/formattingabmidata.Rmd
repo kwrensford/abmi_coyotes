@@ -1,0 +1,332 @@
+---
+title: "formattingabmidata"
+output: html_document
+---
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(ggmap)
+library(reshape2)
+```
+
+```{r}
+# Camera Reports
+setwd("~/CoyoteRange")
+all_main_reports <- vroom::vroom("data/ABMI EH 2014-2019 Main Reports.csv")
+all_image_reports <- vroom::vroom("data/ABMI EH 2014-2019 Image Reports.csv")
+
+head(all_main_reports)
+head(all_image_reports)
+
+camlocations <- all_main_reports %>%
+  distinct(location, .keep_all = TRUE)
+
+##Create column for year of report
+all_main_reports$year <- lubridate::year(all_main_reports$image_date_time)
+all_image_reports$year <- lubridate::year(all_image_reports$image_date_time)
+
+##Filter reports to 2015-2019 range
+study_image_reports<-all_image_reports %>%
+  filter(year > 2014 & year < 2020)
+
+study_main_reports<-all_main_reports %>%
+  filter(year > 2014 & year < 2020)
+
+sort(unique(all_main_reports$species_common_name))
+
+##Segment Data for each Year
+main_reports_2015<-all_main_reports%>%
+  filter(year==2015)
+
+main_reports_2016<-all_main_reports%>%
+  filter(year==2016)
+
+main_reports_2017<-all_main_reports%>%
+  filter(year==2017)
+
+main_reports_2018<-all_main_reports%>%
+  filter(year==2018)
+
+main_reports_2019<-all_main_reports%>%
+  filter(year==2019)
+
+#Camera effort data
+total_operation_days<- vroom::vroom("data/Total Days of Operations ABMI EH 2014-2020.csv")
+
+camera_operation_dates <- vroom::vroom("data/Operation Dates ABmi EH 2014-2018.csv")
+
+##Use image reports file to extract camera operation dates for each location
+camera_operation_dates_v2<-study_image_reports %>%
+  group_by(year, project_id, location) %>%
+  summarize(
+    start_date_time = min(image_date_time),
+    end_date_time = max(image_date_time)
+  )
+```
+
+
+```{r}
+# camtrapR occupancy modeling workflow
+
+##Camera operation matrix
+camera_operation_dates_filtered<-camera_operation_dates_v2%>%
+  filter(!is.na(start_date_time))
+
+#camera_operation_dates_filtered<-camera_operation_dates_filtered%>%
+#  mutate(start_date_time = as.character(start_date_time))%>%
+ # mutate(end_date_time = as.character(end_date_time))
+
+##Start and end dates for deployments per year
+camera_deployment_dates<-camera_operation_dates_filtered %>%
+  group_by(location, year)%>%
+  summarize(
+    start_date_time = min(start_date_time),
+    end_date_time = max (end_date_time),
+    .groups = "drop"
+  )
+
+##Idenitfy gaps or periods of inactivity within a camera's deployment "problems"
+problem_matrix <-camera_operation_dates_filtered%>%
+  arrange(location, year, start_date_time)%>%
+  group_by(location, year)%>%
+  mutate(
+    Problem1_from = lag(end_date_time) + 1,
+    Problem1_to = start_date_time -1
+  ) %>%
+  filter(!is.na(Problem1_from)& Problem1_from <= Problem1_to)%>%
+  dplyr::select(location, year, Problem1_from, Problem1_to)
+
+##Combine problems with deployment data
+camera_deployment_problems<-camera_deployment_dates%>%
+  left_join(problem_matrix, by = c("location", "year"))%>%
+              arrange(location, year, start_date_time, Problem1_from)
+
+##Convert dates to character to be compatible with camptrapR
+#camera_deployment_problems<-camera_deployment_problems%>%
+#  mutate(start_date_time = as.character(start_date_time))%>%
+#  mutate(end_date_time = as.character(end_date_time))
+
+##Filter cameras where start and end time are identical
+camera_deployment_problems<-camera_deployment_problems%>%
+  filter(start_date_time != end_date_time)
+
+#Build a camera operation matrix to fill with detections
+camera_operation_matrix<-cameraOperation(camera_deployment_problems,
+                                         stationCol = "location",
+                                         sessionCol = "year",
+                                         setupCol = "start_date_time",
+                                         retrievalCol = "end_date_time",
+                                         writecsv = FALSE,
+                                         hasProblems = TRUE,
+                                         dateFormat = "ymd_HMS"
+                                         )
+##Camera detection history
+datetime_check<-as.POSIXct(study_main_reports$image_date_time, format = ymd_HMS)
+invalid_entries<-study_main_reports[is.na(datetime_check),]
+invalid_entries
+
+###Daylight savings time!! 4 coyote observations fall in the DST hour, so shifting to 3:00 to compensate (I'll figure out a more elegant way to do this later)
+
+##entries 255396,255397,1882366,7326233
+
+study_main_reports[255396,9] <- as.POSIXct("2015-03-08 3:03:29", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+study_main_reports[255397,9]<- as.POSIXct("2015-03-08 3:03:49", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+study_main_reports[1882366,9]<- as.POSIXct("2015-03-08 3:00:01", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+study_main_reports[7326233,9]<- as.POSIXct("2018-03-11 3:15:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+
+##Create detection tables for each focal species
+
+##Coyote
+coyotedetectionhistory<-detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Coyote",
+                                         occasionLength = 1,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+
+coyotedetections<-coyotedetectionhistory$detection_history
+
+##Lynx
+lynxdetectionhistory<-detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Canada Lynx",
+                                         occasionLength = 1,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+lynxdetections<-lynxdetectionhistory$detection_history
+
+
+##Marten
+martendetectionhistory<-detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Marten",
+                                         occasionLength = 1,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+martendetections<-martendetectionhistory$detection_history
+
+
+##Fisher
+fisherdetectionhistory<-detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Fisher",
+                                         occasionLength = 1,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+fisherdetections<-fisherdetectionhistory$detection_history
+
+
+##Survey report
+survey_report <- surveyReport(recordTable = study_main_reports,
+                              CTtable = camera_operation_dates,
+                              camOp = camera_operation_matrix,
+                              speciesCol = "species_common_name",
+                              stationCol = "location",
+                              setupCol = "start_date_time",
+                              retrievalCol = "end_date_time",
+                              CTDateFormat = "ymd_HMS",
+                              recordDateTimeCol = "image_date_time",
+                              recordDateTimeFormat = "ymd_HMS"
+                              )
+```
+
+##Covariate data
+```{r}
+#Load in human footprint dataset, buffered and unbuffered
+ehs_humanfootprint<-vroom::vroom("data/Point Level Vegetation HF for Kwasi.csv")
+ehs_humanfootprint_buffered<-vroom::vroom("data/150m Buffer Vegetation HF for Kwasi.csv")
+
+#Combine buffered and unbuffered dataset
+buffered_renamed <- ehs_humanfootprint_buffered %>%
+  rename_with(~ paste0(.x, "_buf"),
+              .cols = -location)
+
+ehs_humanfootprint_merged <- ehs_humanfootprint %>%
+  left_join(buffered_renamed, by = "location")
+```
+
+```{r}
+camlocations <- all_main_reports %>%
+  distinct(location, .keep_all = TRUE)
+
+# Join the two datasets by Station
+check_coords <- ehs_humanfootprint_merged %>%
+  left_join(camlocations %>% dplyr::select(location, latitude_cam = latitude, longitude_cam = longitude),
+            by = "location")
+
+# Flag mismatches
+check_coords <- check_coords %>%
+  mutate(
+    lat_mismatch = Lat != latitude_cam,
+    lon_mismatch = Long != longitude_cam
+  )
+
+# View rows with mismatches
+filter(check_coords, lat_mismatch | lon_mismatch)
+
+```
+
+```{r}
+covariates_fixed <- check_coords %>%
+  mutate(
+    Latitude  = ifelse(lat_mismatch, latitude_cam, Lat),
+    Longitude = ifelse(lon_mismatch, longitude_cam, Long)
+  ) %>%
+  dplyr::select(-latitude_cam, -longitude_cam, -lat_mismatch, -lon_mismatch, -Lat, -Long)
+```
+
+##Align covariates with detection matrix locations
+```{r}
+covariates_aligned <- covariates_fixed %>%
+  filter(location %in% row.names(coyotedetections)) %>%
+  arrange(match(location)
+
+# ensure same order
+all(row.names(coyotedetections) == covariates_aligned$location)
+
+sites_det <- rownames(coyotedetections)
+sites_cov <- covariates_aligned$location
+
+setdiff(sites_det, sites_cov)  # sites in detections but not in covariates
+setdiff(sites_cov, sites_det)  # sites in covariates but not in detections
+
+common_sites <- intersect(sites_det, sites_cov)
+
+# filter detections
+coyotedetections <- coyotedetections[common_sites, ]
+lynxdetections <- lynxdetections[common_sites, ]
+martendetections <- martendetections[common_sites, ]
+fisherdetections <- fisherdetections[common_sites, ]
+
+
+# filter covariates
+covariates_aligned <- covariates_aligned %>%
+  filter(location %in% common_sites) %>%
+  arrange(match(location, common_sites))
+
+# Which sites are duplicated?
+dup_sites <- covariates_aligned$location[duplicated(covariates_aligned$location)]
+dup_sites
+
+# Count how many times each site occurs
+table(covariates_aligned$location)
+
+covariates_unique <- covariates_aligned %>%
+  distinct(location, .keep_all = TRUE)
+
+identical(rownames(coyotedetections), covariates_unique$location)
+identical(rownames(lynxdetections), covariates_unique$location)
+identical(rownames(martendetections), covariates_unique$location)
+identical(rownames(fisherdetections), covariates_unique$location)
+```
+
+```{r}
+write.csv(covariates_unique, file = "ehscovars.csv", row.names = FALSE)
+write.csv(coyotedetections, file = "coyotedetections.csv", row.names = FALSE)
+write.csv(lynxdetections, file = "lynxdetections.csv", row.names = FALSE)
+write.csv(martendetections, file = "martendetections.csv", row.names = FALSE)
+write.csv(fisherdetections, file = "fisherdetections.csv", row.names = FALSE)
+```

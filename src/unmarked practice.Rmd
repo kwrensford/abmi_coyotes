@@ -1,0 +1,64 @@
+---
+title: "unmarked practice"
+author: "Kwasi Wrensford"
+date: "2024-06-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(unmarked)
+wt <- read.csv(system.file("csv","widewt.csv", package="unmarked"))
+y <- wt[,2:4]
+siteCovs <-  wt[,c("elev", "forest", "length")]
+obsCovs <- list(date=wt[,c("date.1", "date.2", "date.3")],
+    ivel=wt[,c("ivel.1",  "ivel.2", "ivel.3")])
+wt <- unmarkedFrameOccu(y = y, siteCovs = siteCovs, obsCovs = obsCovs)
+summary(wt)
+```
+"unmarked" data require sites (in this case would be camera sites), covariates per site, and covariates per observation. 
+
+Presence-absence records: data.frame of presence-absence records, rows are sites, columns are repeat visits.
++ A row for every camera in the study, column is operation day, 0 or 1 for coyote presence. 
+
+```{r}
+pcru <- csvToUMF(system.file("csv","frog2001pcru.csv", package="unmarked"),
+                 long = TRUE, type = "unmarkedFrameOccu")
+```
+
+```{r}
+obsCovs(pcru) <- scale(obsCovs(pcru))
+```
+
+```{r}
+fm1 <- occu(~1 ~1, pcru)
+```
+
+```{r}
+fm2 <- occu(~ MinAfterSunset + Temperature ~ 1, pcru)
+fm2
+```
+##Turning camera data into usable framework for unmarked. 
+Read in camera data
+```{r}
+all_main_reports <- vroom::vroom("data/ABMI EH 2014-2019 Main Reports.csv")
+all_main_reports$year <- lubridate::year(all_main_reports$image_date_time)
+
+# Filter to carnivores
+carnivores <- all_main_reports %>%
+  dplyr::filter(species_common_name %in% c("Bear", "Black Bear", "Bobcat", "Canada Lynx",
+                                           "Canidae Family", "Common Raccoon", "Cougar",
+                                           "Coyote", "Ermine", "Fisher", "Gray Wolf",
+                                           "Grizzly Bear", "Marten", "Red Fox", "Striped Skunk",
+                                           "Swift fox", "Weasels and Ermine"))
+```
+
+```{r}
+detection_data<-data.frame(
+  site = 
+)
+```

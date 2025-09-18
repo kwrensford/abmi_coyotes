@@ -1,0 +1,233 @@
+---
+title: "doserlabvignette"
+output: html_document
+---
+
+##Doser lab vignette of multiseason occupancy models Below I work through the Doser lab vignette on spatially explicit multiseason occupancy model. using data from annual surveys of gleaning birds.
+
+First, load in sample detection-nondetection data for 12 bird species
+
+```{r}
+data(hbefTrends)
+str(hbefTrends)
+```
+
+Create new object that only contains focal species
+
+```{r}
+revi.data<-hbefTrends
+sp.names<- dimnames(hbefTrends$y)[[1]]
+revi.data$y <- revi.data$y[sp.names=='REVI',,,]
+str(revi.data)
+```
+
+For multiseason occu model, you'll need a list object that contains 1) occurence data array that consists of the number of sites, primary time periods (eg years), and the number of replicates (secondary time perids, days for cam data?)
+
+Occurence covariates that vary spatially should be specified as a vector of length = \# of sites.
+
+For variables that vary with time only, those must be specified as a site x time period matrix, holding values in each time period constant.
+
+```{r}
+revi.data$occ.cov$years[1:4, ]
+```
+
+Detection covariates are specified in the same way as above. We also have observation level covariates that vary across, space, time, and replicate.
+
+Coords must be specified in a projected coordinate system.
+
+Fitting the multiseason occu model
+
+Starting with raw occurence probability.
+
+```{r}
+raw.occ.prob <-apply(revi.data$y, 2, mean, na.rm = TRUE)
+plot(2010:2018, raw.occ.prob, pch = 16,
+     xlab = 'Year', ylab = 'Raw Occurence Proportion',
+     cex = 1.5, frame = FALSE, ylim = c(0,1))
+```
+
+Model occurence as a function of a linear temporal trend, with a linear and quadratic effect of elevation. Detection is modeled as a function of day of survey (linear and quadratic), and time of day. Start by fitting a model with an unstructured site-level random effect, and an unstructured temporal random effect.
+
+```{r}
+revi.occ.formula <- ~ scale(years) + scale(elev) + I(scale(elev)^2)+
+  (1|years) + (1|site.effect)
+revi.det.formula <- ~ scale(day) + I(scale(day)^2) + scale(tod)
+```
+
+Next we specify initial values for all model parameters.
+
+```{r}
+z.inits <- apply(revi.data$y, c(1,2), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
+revi.inits <- list(beta = 0,          #occurence coefficients
+                   alpha = 0,         #detection coefficients 
+                   sigma.sq.psi = 1,  #occurence random effect varainces
+                   z = z.inits)       #latent occurence values
+```
+
+Specify priors
+
+```{r}
+revi.priors <- list(beta.normal = list(mean = 0, var = 2.72),
+                    alpha.normal = list(mean = 0, var = 2.72),
+                    sigma.sq.psi.ig = list(a = 0.1, b = 0.1))
+```
+
+Set arguments that control how long we run the MCM. We split the samples into a set of n.batch batches, each comprised of batch.length.
+
+```{r}
+n.chains <- 3
+n.batch <- 200
+batch.length <- 25
+n.samples <- n.batch * batch.length
+n.burn <- 2000
+n.thin <- 12
+```
+
+Set ar1 \<- FALSE to indicate we will not fit the model with an AR(1) temporal random effect (the default)
+
+```{r}
+ar1 <- FALSE
+```
+
+Run the model, with n.report = 50 to report model progress after every 50th batch.
+
+```{r}
+out <- tPGOcc(occ.formula = revi.occ.formula,
+              det.formula = revi.det.formula,
+              data = revi.data,
+              n.batch = n.batch,
+              batch.length = batch.length,
+              inits = revi.inits,
+              priors = revi.priors,
+              ar1 = ar1,
+              n.burn = n.burn,
+              n.thin = n.thin,
+              n.chains = n.chains,
+              n.report = 50)
+```
+
+Initial model results
+
+```{r}
+summary(out)
+```
+
+Next we fit the same model with an AR(1) tempral random effect.
+
+```{r}
+out.ar1 <- tPGOcc(occ.formula = ~ scale(years) + scale(elev) + I(scale(elev)^2) +
+                    (1 | site.effect),
+                  det.formula = revi.det.formula,
+                  data = revi.data,
+                  n.batch = n.batch,
+                  batch.length = batch.length,
+                  inits = revi.inits,
+                  priors = revi.priors,
+                  ar1 = TRUE,
+                  n.burn = n.burn,
+                  n.thin = n.thin,
+                  n.chains = n.chains,
+                  n.report = 50)
+```
+
+```{r}
+summary(out.ar1)
+```
+
+Formal comparison of the two models with different temporal random effects
+
+```{r}
+waicOcc(out)
+waicOcc(out.ar1)
+```
+
+Goodness of fit assessment through conducting a posterior predictive check of both models.
+
+```{r}
+# Unstructured temporal random effect
+ppc.out <- ppcOcc(out, fit.stat = 'freeman-tukey', group = 1)
+```
+
+```{r}
+summary(ppc.out)
+```
+
+```{r}
+# AR(1) temporal random effect
+ppc.out.ar1 <- ppcOcc(out.ar1, fit.stat = 'freeman-tukey', group = 1)
+```
+
+```{r}
+summary(ppc.out.ar1)
+```
+
+Predicting occurrence across the study site
+
+```{r}
+data(hbefElev)
+str(hbefElev)
+```
+
+```{r}
+# Number of prediction sites.
+J.pred <- nrow(hbefElev)
+# Number of prediction years.
+n.years.pred <- 2
+# Number of predictors (including intercept)
+p.occ <- ncol(out.ar1$beta.samples)
+# Get covariates and standardize them using values used to fit the model
+elev.pred <- (hbefElev$val - mean(revi.data$occ.covs$elev)) / sd(revi.data$occ.covs$elev)
+year.pred <- matrix(rep((c(2010, 2018) - mean(revi.data$occ.covs$years)) / 
+            sd(revi.data$occ.covs$years), 
+                    length(elev.pred)), J.pred, n.years.pred, byrow = TRUE)
+# Create three-dimensional array
+X.0 <- array(1, dim = c(J.pred, n.years.pred, p.occ))
+# Fill in the array
+# Years
+X.0[, , 2] <- year.pred
+# Elevation
+X.0[, , 3] <- elev.pred
+# Elevation^2
+X.0[, , 4] <- elev.pred^2
+# Check out the structure
+str(X.0)
+```
+
+```{r}
+# Indicate which primary time periods (years) we are predicting for
+t.cols <- c(1, 9)
+# Approx. run time: < 30 sec
+out.pred <- predict(out.ar1, X.0, t.cols = t.cols, ignore.RE = TRUE, type = 'occupancy')
+# Check out the structure
+str(out.pred)
+```
+
+```{r}
+plot.dat <- data.frame(x = hbefElev$Easting, 
+                       y = hbefElev$Northing, 
+                       mean.2009.psi = apply(out.pred$psi.0.samples[, , 1], 2, mean), 
+                       mean.2018.psi = apply(out.pred$psi.0.samples[, , 2], 2, mean), 
+                       sd.2009.psi = apply(out.pred$psi.0.samples[, , 1], 2, sd), 
+                       sd.2018.psi = apply(out.pred$psi.0.samples[, , 2], 2, sd), 
+                       stringsAsFactors = FALSE)
+# Make a species distribution map showing the point estimates,
+# or predictions (posterior means)
+dat.stars <- st_as_stars(plot.dat, dims = c('x', 'y'))
+# 2009
+ggplot() + 
+  geom_stars(data = dat.stars, aes(x = x, y = y, fill = mean.2009.psi)) +
+  scale_fill_viridis_c(na.value = 'transparent') +
+  labs(x = 'Easting', y = 'Northing', fill = '', 
+       title = 'Mean REVI occurrence probability 2009') +
+  theme_bw()
+```
+
+```{r}
+# 2018
+ggplot() + 
+  geom_stars(data = dat.stars, aes(x = x, y = y, fill = mean.2018.psi)) +
+  scale_fill_viridis_c(na.value = 'transparent') +
+  labs(x = 'Easting', y = 'Northing', fill = '', 
+       title = 'Mean REVI occurrence probability 2018') +
+  theme_bw()
+```

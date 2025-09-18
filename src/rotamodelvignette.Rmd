@@ -1,0 +1,20 @@
+---
+title: "rotamodelvignette"
+output: html_document
+---
+
+```{r}
+library(unmarked)
+data(MesoCarnivores)
+names(MesoCarnivores)
+```
+
+```{r}
+ylist <- list(bobcat=MesoCarnivores$bobcat, coyote=MesoCarnivores$coyote, 
+              redfox=MesoCarnivores$redfox)
+lapply(ylist, head)
+```
+
+```{r}
+head(MesoCarnivores$sitecovs)
+```

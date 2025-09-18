@@ -1,0 +1,290 @@
+---
+title: "coyote_multispecies_rota"
+output: html_document
+---
+
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(MASS)
+library(hms)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(stars)
+library(sf)
+library(terra)
+library(rstan)
+library(cmdstanr)
+library(rjags)
+library(Rcpp)
+library(stringr)
+```
+
+#Formatting detection non-detection data
+
+```{r}
+coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
+lynx <- as.matrix(read.csv("data/lynxdetections.csv"))
+marten <- as.matrix(read.csv("data/martendetections.csv"))
+fisher <- as.matrix(read.csv("data/fisherdetections.csv"))
+```
+
+#Load in covariate data
+
+```{r}
+covariates <- read.csv("data/ehscovars.csv")
+```
+
+```{r}
+#Sim test
+
+set.seed(123)
+y1 <- matrix(rbinom(100, 1, 0.3), nrow=20)
+y2 <- matrix(rbinom(100, 1, 0.2), nrow=20)
+
+ylist_test <- list(Coyote = y1, Lynx = y2)
+
+umf_test <- unmarkedFrameOccuMulti(y = ylist_test)
+
+fit_test <- occuMulti(
+  detformula   = c("~1", "~1"),
+  stateformula = c("~1", "~1", "~1"),
+  data         = umf_test
+)
+
+summary(fit_test)
+```
+
+```{r}
+ylist <- list(coyote = coyote, lynx = lynx, marten = marten,  fisher = fisher)
+
+ylist$coyote[is.na(ylist$coyote)] <- 0
+ylist$lynx[is.na(ylist$lynx)] <- 0
+ylist$marten[is.na(ylist$marten)] <- 0
+ylist$fisher[is.na(ylist$fisher)] <- 0
+
+```
+
+```{r}
+umf <- unmarkedFrameOccuMulti(y = ylist)
+```
+
+```{r}
+umf@fDesign
+
+colnames(umf@fDesign)
+
+stateformulas <- c("~1", "~1", "~1", "~1", "~1", "~1", "~1", "0", "0", "0", "0", "0", "0", "0", "0")
+
+detformulas <- c("~1","~1","~1", "~1")
+
+```
+
+```{r}
+ylist_null <- list(coyote = coyote, lynx = lynx)
+
+ylist_null$coyote[is.na(ylist_null$coyote)] <- 0
+ylist_null$lynx[is.na(ylist_null$lynx)] <- 0
+
+```
+
+```{r}
+umf_null <- unmarkedFrameOccuMulti(y = ylist_null)
+```
+
+```{r}
+umf_null@fDesign
+
+colnames(umf_null@fDesign)
+
+stateformulas_null <- c("~1", "~1", "~1")
+
+detformulas_null <- c("~1","~1")
+
+```
+```{stan}
+data {
+  int<lower=1> N;           // number of sites
+  int<lower=1> T;           // number of occasions
+  int<lower=0,upper=1> y1[N, T];  // detections for species 1 (Coyote)
+  int<lower=0,upper=1> y2[N, T];  // detections for species 2 (Lynx)
+}
+
+parameters {
+  real<lower=0, upper=1> psi1;  // occupancy probability for Coyote
+  real<lower=0, upper=1> psi2;  // occupancy probability for Lynx
+  real<lower=0, upper=1> p1;    // detection probability for Coyote
+  real<lower=0, upper=1> p2;    // detection probability for Lynx
+}
+
+transformed parameters {
+  // none needed for basic model
+}
+
+model {
+  // priors
+  psi1 ~ beta(1,1);
+  psi2 ~ beta(1,1);
+  p1   ~ beta(1,1);
+  p2   ~ beta(1,1);
+
+  // likelihood
+  for (i in 1:N) {
+    // Coyote
+    target += bernoulli_lpmf(max(y1[i,]) | psi1);  // occupancy contribution
+    for (t in 1:T) {
+      target += bernoulli_lpmf(y1[i,t] | p1 * psi1);
+    }
+    // Lynx
+    target += bernoulli_lpmf(max(y2[i,]) | psi2);
+    for (t in 1:T) {
+      target += bernoulli_lpmf(y2[i,t] | p2 * psi2);
+    }
+  }
+}
+
+```
+```{r}
+# Replace NAs with 0 for y matrices (Stan cannot store NA) 
+y1_clean <- coyote
+y2_clean <- lynx
+is_obs1 <- ifelse(is.na(y1_clean), 0, 1)
+is_obs2 <- ifelse(is.na(y2_clean), 0, 1)
+y1_clean[is.na(y1_clean)] <- 0
+y2_clean[is.na(y2_clean)] <- 0
+
+stan_data <- list(
+  N = nrow(y1_clean),
+  T = ncol(y1_clean),
+  y1 = y1_clean,
+  y2 = y2_clean,
+  is_obs1 = is_obs1,
+  is_obs2 = is_obs2
+)
+
+```
+
+```{r}
+library(rstan)
+
+fit <- stan(
+  file = "two_species_latent.stan",
+  data = stan_data,
+  chains = 4,
+  iter = 2000
+)
+
+print(fit, pars=c("psi1","psi2","p1","p2"))
+
+
+```
+
+```{r}
+for(sp in names(ylist_null)){
+  cat("\nSpecies:", sp, "\n")
+  mat <- ylist[[sp]]
+  cat("Total detections:", sum(mat, na.rm=TRUE), "\n")
+  cat("Number of sites with all zeros:", sum(rowSums(mat, na.rm=TRUE) == 0), "\n")
+  cat("Number of sites with all ones:", sum(rowSums(mat, na.rm=TRUE) == ncol(mat)), "\n")
+}
+
+y1 <- matrix(c(1,0,0,1,0,1,0,0), nrow=4)
+y2 <- matrix(c(0,1,0,1,0,0,1,0), nrow=4)
+umf_test <- unmarkedFrameOccuMulti(y = list(Coyote=y1, Lynx=y2))
+fit <- occuMulti(detformulas=c("~1","~1"), stateformulas=c("~1","~1","~1"), data=umf_test)
+```
+
+```{r}
+
+# CREATING DESIGN MATRIX
+X.array <- array(0, dim = c(nrow(coyote), 16, 32))
+
+clim <- scale(psi.cov$MCMT)[, 1]
+hf <- scale(psi.cov$RoadHardSurface_buf)[, 1]
+lati <- scale(psi.cov$Latitude)[, 1]
+long <- scale(psi.cov$Longitude)[, 1]
+lbyl <- lati * long
+hike <- scale(psi.cov$People_site * 1000 / cday)
+
+# importing the general form of the design matrix
+library(xlsx)
+dm <- read.xlsx('Design Matrix.xlsx', 3, rowIndex = 3:18, colIndex = 2:33,
+                header = F)
+
+# filling in the design matrix
+for(i in 1:nrow(coyote)){
+  for(j in 1:15){
+    X.array[i, j, dm[j, ] == 1] <-
+      c(1, lati[i], long[i], lbyl[i], hike[i],
+        1, lati[i], long[i], lbyl[i], hden[i],
+        1, lati[i], long[i], lbyl[i], hden[i],
+        1, lati[i], long[i], lbyl[i], hike[i],
+        1, d5km[i],
+        1, hden[i],
+        1, hden[i],
+        1, d5km[i],
+        1, hden[i],
+        1, d5km[i])[dm[j, ] == 1]
+  }
+}
+
+
+# OBSERVED Y
+y1max <- apply(coyote, 1, max, na.rm = T)
+y2max <- apply(lynx, 1, max, na.rm = T)
+y3max <- apply(marten, 1, max, na.rm = T)
+y4max <- apply(fisher, 1, max, na.rm = T)
+
+# Vectorizing detection / non-detection
+Y1 <- Y2 <- Y3 <- Y4 <- trail <- dd <- numeric()
+for(i in 1:nrow(bobcat)){
+  Y1 <- c(Y1, bobcat[i, 1:cday[i]])
+  Y2 <- c(Y2, coyote[i, 1:cday[i]])
+  Y3 <- c(Y3, gryfox[i, 1:cday[i]])
+  Y4 <- c(Y4, redfox[i, 1:cday[i]])
+  trail <- c(trail, rep(psi.cov$Trail[i], cday[i]))
+  dd <- c(dd, rep(p.cov$Det_dist[i], cday[i]))
+}
+
+# Stan does not support ragged indexing.  This is a work-around
+start <- 1
+for(i in 2:nrow(bobcat)){
+  start <- c(start, sum(cday[1:(i - 1)]) + 1)
+}
+
+data <- list(
+  K = ncol(X.array[1, , ]),
+  L = 3,
+  N = nrow(bobcat),
+  NJ = length(Y1),
+  S = 16,
+  obs = cday,
+  start = start,
+  x = X.array,
+  trl = trail,
+  dd = scale(dd)[, 1],
+  I1 = y1max, I2 = y2max, I3 = y3max, I4 = y4max,
+  Y1 = Y1, Y2 = Y2, Y3 = Y3, Y4 = Y4
+  )
+
+inits <- function(){
+  list(
+    a1 = rnorm(3),
+    a2 = rnorm(3),
+    a3 = rnorm(3),
+    a4 = rnorm(3),
+    beta = rnorm(ncol(X.array[1, , ])))
+}
+
+params <- c('a1', 'a2', 'a3', 'a4', 'beta', 'll')
+
+```
+
+
+```{r}
+```
