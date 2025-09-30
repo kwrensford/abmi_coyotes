@@ -28,38 +28,311 @@ library(stringr)
 #Formatting detection non-detection data
 
 ```{r}
-coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
-lynx <- as.matrix(read.csv("data/lynxdetections.csv"))
-marten <- as.matrix(read.csv("data/martendetections.csv"))
-fisher <- as.matrix(read.csv("data/fisherdetections.csv"))
+coyote <- as.matrix(read.csv("data/coyotedetections_boreal.csv"))
+lynx <- as.matrix(read.csv("data/lynxdetections_boreal.csv"))
+marten <- as.matrix(read.csv("data/martendetections_boreal.csv"))
+fisher <- as.matrix(read.csv("data/fisherdetections_boreal.csv"))
 ```
 
 #Load in covariate data
 
 ```{r}
-covariates <- read.csv("data/ehscovars.csv")
+climate <- read.csv("data/climatecovars.csv")
+hf <- read.csv("data/hfcovars.csv")
+```
+
+##Covariate data
+```{r}
+covars <- bind_cols(climate, hf[,4])
+
+covars<-rename(covars, hf = ...6)
+```
+
+##Single Species
+```{r}
+umf_coyote <- unmarkedFrameOccu(
+  y = coyote,
+  siteCovs = covars
+)
+
+mod_coyote <- occu(
+  formula = ~1 ~PC1*hf + PC2*hf, 
+  data = umf_coyote
+)
+
+summary(mod_coyote)
+```
+
+##Occumulti approach - coyote lynx only
+```{r}
+ylist_lynx <- list(coyote = coyote, lynx = lynx)
+
+ylist_lynx$coyote[is.na(ylist_lynx$coyote)] <- 0
+ylist_lynx$lynx[is.na(ylist_lynx$lynx)] <- 0
+
+umf_lynx <- unmarkedFrameOccuMulti(y = ylist_lynx, siteCovs = covars)
+
+stateformulas_lynx <- c("~PC1*hf + PC2*hf", "~PC1*hf + PC2*hf", "~PC1*hf + PC2*hf")
+detformulas_lynx <-  c("~1", "~1")
+
+mod_lynx <- occuMulti(
+  detformulas = detformulas_lynx,
+  stateformulas = stateformulas_lynx,
+  data = umf_lynx,
+  method = "BFGS",
+  se =TRUE
+)
+
+summary(mod_lynx)
+coef(mod_lynx)
+SE(mod_lynx)             # standard errors
+confint(mod_lynx, type = "state")        # confidence intervals
+```
+
+##Marginal occupancy coyote-lynx
+```{r}
+
+```
+
+##Conditional occupancy coyote-lynx Climate pc1
+```{r}
+pc1data <- data.frame(
+  PC1 = seq(min(covars$PC1, na.rm = TRUE),
+           max(covars$PC1, na.rm = TRUE),
+           length.out = 100),
+  PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
+  hf = mean(covars$hf, na.rm = TRUE)
+)
+
+
+# Example: conditional occupancy of coyote given lynx present
+pred_cond <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = pc1data    # a data.frame with covariates of interest
+)
+
+# Coyote occupancy given lynx present
+pred_lynx_present <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = pc1data
+)
+
+# Coyote occupancy given lynx absent
+pred_lynx_absent <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "-coyote",   # the minus sign = species absent
+  newdata = pc1data
+)
+
+df <- data.frame(
+  cov = pc1data$PC1,
+  present = pred_lynx_present$Predicted,
+  lower_present = pred_lynx_present$lower,
+  upper_present = pred_lynx_present$upper,
+  absent = pred_lynx_absent$Predicted,
+  lower_absent = pred_lynx_absent$lower,
+  upper_absent = pred_lynx_absent$upper
+)
+
+
+ggplot(df, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Lynx occupancy probability",
+       x = "Human footprint",
+       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+
+
+```
+
+##Conditional occupancy coyote-lynx Climate pc2
+```{r}
+pc2data <- data.frame(
+  PC2 = seq(min(covars$PC2, na.rm = TRUE),
+           max(covars$PC2, na.rm = TRUE),
+           length.out = 100),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  hf = mean(covars$hf, na.rm = TRUE)
+)
+
+
+# Example: conditional occupancy of coyote given lynx present
+pred_cond_pc2 <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = pc2data    # a data.frame with covariates of interest
+)
+
+# Coyote occupancy given lynx present
+pred_lynx_present_pc2 <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = pc2data
+)
+
+# Coyote occupancy given lynx absent
+pred_lynx_absent_pc2 <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "-coyote",   # the minus sign = species absent
+  newdata = pc2data
+)
+
+df_pc2 <- data.frame(
+  cov = pc2data$PC2,
+  present = pred_lynx_present_pc2$Predicted,
+  lower_present = pred_lynx_present_pc2$lower,
+  upper_present = pred_lynx_present_pc2$upper,
+  absent = pred_lynx_absent_pc2$Predicted,
+  lower_absent = pred_lynx_absent_pc2$lower,
+  upper_absent = pred_lynx_absent_pc2$upper
+)
+
+
+ggplot(df_pc2, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Lynx occupancy probability",
+       x = "Climate pc2",
+       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+
+
+```
+
+##Conditional occupancy coyote-lynx Climate hf
+```{r}
+hfdata <- data.frame(
+  hf = seq(min(covars$hf, na.rm = TRUE),
+           max(covars$hf, na.rm = TRUE),
+           length.out = 100),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  PC2 = mean(covars$PC2, na.rm = TRUE)
+)
+
+
+# Example: conditional occupancy of coyote given lynx present
+pred_cond_hf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = hfdata    # a data.frame with covariates of interest
+)
+
+# Coyote occupancy given lynx present
+pred_lynx_present_hf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = hfdata
+)
+
+# Coyote occupancy given lynx absent
+pred_lynx_absent_hf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "-coyote",   # the minus sign = species absent
+  newdata = hfdata
+)
+
+df_hf <- data.frame(
+  cov = hfdata$hf,
+  present = pred_lynx_present_hf$Predicted,
+  lower_present = pred_lynx_present_hf$lower,
+  upper_present = pred_lynx_present_hf$upper,
+  absent = pred_lynx_absent_hf$Predicted,
+  lower_absent = pred_lynx_absent_hf$lower,
+  upper_absent = pred_lynx_absent_hf$upper
+)
+
+
+ggplot(df_hf, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Lynx occupancy probability",
+       x = "Human footprint",
+       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+
+
 ```
 
 ```{r}
-#Sim test
-
-set.seed(123)
-y1 <- matrix(rbinom(100, 1, 0.3), nrow=20)
-y2 <- matrix(rbinom(100, 1, 0.2), nrow=20)
-
-ylist_test <- list(Coyote = y1, Lynx = y2)
-
-umf_test <- unmarkedFrameOccuMulti(y = ylist_test)
-
-fit_test <- occuMulti(
-  detformula   = c("~1", "~1"),
-  stateformula = c("~1", "~1", "~1"),
-  data         = umf_test
+newdata_coylynx <- data.frame(
+  PC1 = seq(min(covars$PC1), max(covars$PC1), length.out=50),
+  PC2 = mean(covars$PC2),
+  hf = mean(covars$hf)
 )
 
-summary(fit_test)
+pred_lynxcoy <- predict(mod_lynx, type = "state")
+
+psi_coy <- pred_lynxcoy$Predicted[,2] + pred_lynxcoy$Predicted[,1]
+psi_lynx <- pred_lynxcoy$Predicted[,3] + pred_lynxcoy$Predicted[,1]
+
+psi_lynx_given_coy <- pred_lynxcoy$Predicted[,1] / (pred_lynxcoy$Predicted[,3] + pred_lynxcoy$Predicted[,1])
+psi_lynx_given_no_coy <- pred_lynxcoy$Predicted[,3] / (pred_lynxcoy$Predicted[,4] + pred_lynxcoy$Predicted[,2])
+
+pred <- data.frame(
+  psi_coy = psi_coy,
+  psi_lynx = psi_lynx,
+  psi_lynx_given_coy,
+  psi_lynx_given_no_coy
+)
+
+df_plot <-
 ```
 
+
+```{r}
+hf_range <- range(siteCovs(umf_lynx)$hf)
+hf_seq <- seq(hf_range[1], hf_range[2], length.out = 100)
+
+PC1_mean <- mean(covars$PC1)
+PC2_mean <- mean(covars$PC2)
+
+nd <- data.frame(PC1 = PC1_mean,
+                 PC2 = PC2_mean,
+                 hf = hf_seq
+                 )
+
+occ_hf_coy <- predict(mod_lynx, type="state", species="coyote", newdata=nd)
+occ_hf_coy$Species <- "Coyote"
+occ_hf_coy$hf <- hf_seq
+
+head(occ_hf_coy)
+
+occ_hf_lynx <- predict(mod_lynx, type="state", species="lynx", newdata=nd)
+occ_hf_lynx$Species <- "Lynx"
+occ_hf_lynx$hf <- hf_seq
+
+plot(occ_hf_coy$hf, occ_hf_coy$Predicted, type='l', ylim=c(0,1),
+     col='red', lwd=2, xlab="human footprint", ylab="Marginal occupancy")
+lines(occ_hf_lynx$hf, occ_hf_lynx$Predicted, col='blue', lwd=2)
+
+
+```
+
+##Occumulti approach - all species
 ```{r}
 ylist <- list(coyote = coyote, lynx = lynx, marten = marten,  fisher = fisher)
 
@@ -68,10 +341,12 @@ ylist$lynx[is.na(ylist$lynx)] <- 0
 ylist$marten[is.na(ylist$marten)] <- 0
 ylist$fisher[is.na(ylist$fisher)] <- 0
 
+lapply(ylist, head)
 ```
 
+
 ```{r}
-umf <- unmarkedFrameOccuMulti(y = ylist)
+umf <- unmarkedFrameOccuMulti(y = ylist, siteCovs = covars)
 ```
 
 ```{r}
@@ -83,30 +358,42 @@ stateformulas <- c("~1", "~1", "~1", "~1", "~1", "~1", "~1", "0", "0", "0", "0",
 
 detformulas <- c("~1","~1","~1", "~1")
 
-```
+start_vals <- rep(0.5, 8)
 
-```{r}
-ylist_null <- list(coyote = coyote, lynx = lynx)
-
-ylist_null$coyote[is.na(ylist_null$coyote)] <- 0
-ylist_null$lynx[is.na(ylist_null$lynx)] <- 0
+y_mat <- do.call(cbind, lapply(ylist, rowSums))
+cor(y_mat > 0)
 
 ```
 
 ```{r}
-umf_null <- unmarkedFrameOccuMulti(y = ylist_null)
+mod_null <- occuMulti(detformulas = detformulas, stateformulas = stateformulas, data = umf, method = "BFGS", se = TRUE)
+summary(mod_null)
+```
+```{r}
+umf@fDesign
+
+colnames(umf@fDesign)
+
+clim1_phi <- c("~scale(PC1)", "~scale(PC1)", "~scale(PC1)", "~scale(PC1)", "~scale(PC1)", "~scale(PC1)", "~scale(PC1)", "0", "0", "0", "0", "0", "0", "0", "0")
+
+clim1_p <- c("~1","~1","~1", "~1")
+
+start_vals <- rep(0.5, 8)
+
+y_mat <- do.call(cbind, lapply(ylist, rowSums))
+cor(y_mat > 0)
+
 ```
 
 ```{r}
-umf_null@fDesign
-
-colnames(umf_null@fDesign)
-
-stateformulas_null <- c("~1", "~1", "~1")
-
-detformulas_null <- c("~1","~1")
-
+mod_clim1 <- occuMulti(detformulas = clim1_p, stateformulas = clim1_phi, data = umf, method = "BFGS", se = TRUE)
+summary(mod_clim1)
 ```
+
+```{r}
+occ_prob <- predict(mod_null, type="state")
+```
+##Bayesian Model
 ```{stan}
 data {
   int<lower=1> N;           // number of sites
@@ -149,6 +436,7 @@ model {
 }
 
 ```
+
 ```{r}
 # Replace NAs with 0 for y matrices (Stan cannot store NA) 
 y1_clean <- coyote

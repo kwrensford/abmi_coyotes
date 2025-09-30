@@ -1,7 +1,11 @@
 ---
 title: "formattingabmidata"
 output: html_document
+editor: visual 
+editor_options: 
+  chunk_output_type: console
 ---
+
 ```{r}
 library(vroom)
 library(dplyr)
@@ -16,11 +20,19 @@ library(overlap)
 library(ggmap)
 library(reshape2)
 library(corrplot)
+library(terra)
+library(mapview)
+library(sf)
+library(exactextractr)
+library(xml2)
+library(arcgislayers)
+library(geodata)
 ```
+
 ##Load in and format camera data
+
 ```{r}
 # Camera Reports
-setwd("~/CoyoteRange")
 all_main_reports <- vroom::vroom("data/ABMI EH 2014-2019 Main Reports.csv")
 all_image_reports <- vroom::vroom("data/ABMI EH 2014-2019 Image Reports.csv")
 
@@ -42,12 +54,13 @@ study_image_reports<-all_image_reports %>%
 study_main_reports<-all_main_reports %>%
   filter(year > 2014 & year < 2020)
 
-sort(unique(all_main_reports$species_common_name))
-
 ##Filter to Apr - July for closure
 
-closure_main_reports<-study_main_reports %>%
-  filter(year > 2014 & year < 2020)
+study_main_reports<-study_main_reports %>%
+  filter(month > 3 & month < 8)
+
+study_image_reports<-study_image_reports %>%
+  filter(month > 3 & month < 8)
 
 ##Filter data for only mesos
 meso_reports <- study_main_reports %>%
@@ -87,6 +100,7 @@ camera_operation_dates_v2<-study_image_reports %>%
 ```
 
 ##Create detection matrices for each species
+
 ```{r}
 # camtrapR occupancy modeling workflow
 
@@ -139,7 +153,7 @@ camera_operation_matrix<-cameraOperation(camera_deployment_problems,
                                          setupCol = "start_date_time",
                                          retrievalCol = "end_date_time",
                                          writecsv = FALSE,
-                                         hasProblems = TRUE,
+                                         hasProblems = FALSE,
                                          dateFormat = "ymd_HMS"
                                          )
 ##Camera detection history
@@ -151,12 +165,12 @@ invalid_entries
 
 ##entries 255396,255397,1882366,7326233
 
-study_main_reports[255396,9] <- as.POSIXct("2015-03-08 3:03:29", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-study_main_reports[255397,9]<- as.POSIXct("2015-03-08 3:03:49", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-study_main_reports[1882366,9]<- as.POSIXct("2015-03-08 3:00:01", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-study_main_reports[7326233,9]<- as.POSIXct("2018-03-11 3:15:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[255396,9] <- as.POSIXct("2015-03-08 3:03:29", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[255397,9]<- as.POSIXct("2015-03-08 3:03:49", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[1882366,9]<- as.POSIXct("2015-03-08 3:00:01", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[7326233,9]<- as.POSIXct("2018-03-11 3:15:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
 
-##Create detection tables for each focal species
+##Create detection tables for each focal species with a week  long (7 day) occasion length
 
 ##Coyote
 coyotedetectionhistory<-detectionHistory(recordTable = study_main_reports,
@@ -166,7 +180,7 @@ coyotedetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          recordDateTimeCol = "image_date_time",
                                          recordDateTimeFormat = "ymd_HMS",
                                          species = "Coyote",
-                                         occasionLength = 1,
+                                         occasionLength = 7,
                                          day1 = "station",
                                          datesAsOccasionNames = FALSE,
                                          includeEffort = TRUE,
@@ -185,7 +199,7 @@ lynxdetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          recordDateTimeCol = "image_date_time",
                                          recordDateTimeFormat = "ymd_HMS",
                                          species = "Canada Lynx",
-                                         occasionLength = 1,
+                                         occasionLength = 7,
                                          day1 = "station",
                                          datesAsOccasionNames = FALSE,
                                          includeEffort = TRUE,
@@ -204,7 +218,7 @@ martendetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          recordDateTimeCol = "image_date_time",
                                          recordDateTimeFormat = "ymd_HMS",
                                          species = "Marten",
-                                         occasionLength = 1,
+                                         occasionLength = 7,
                                          day1 = "station",
                                          datesAsOccasionNames = FALSE,
                                          includeEffort = TRUE,
@@ -223,7 +237,7 @@ fisherdetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          recordDateTimeCol = "image_date_time",
                                          recordDateTimeFormat = "ymd_HMS",
                                          species = "Fisher",
-                                         occasionLength = 1,
+                                         occasionLength = 7,
                                          day1 = "station",
                                          datesAsOccasionNames = FALSE,
                                          includeEffort = TRUE,
@@ -235,6 +249,7 @@ fisherdetections<-fisherdetectionhistory$detection_history
 ```
 
 ##Covariate data
+
 ```{r}
 #Load in human footprint dataset, buffered and unbuffered
 ehs_humanfootprint<-vroom::vroom("data/Point Level Vegetation HF for Kwasi.csv")
@@ -250,6 +265,7 @@ ehs_humanfootprint_merged <- ehs_humanfootprint %>%
 ```
 
 ##Make sure covariate locations match detection locations
+
 ```{r}
 camlocations <- all_main_reports %>%
   distinct(location, .keep_all = TRUE)
@@ -281,6 +297,7 @@ covariates_fixed <- check_coords %>%
 ```
 
 ##Align covariates location names with detection matrix locations (same number and order)
+
 ```{r}
 covariates_aligned <- covariates_fixed %>%
   filter(location %in% row.names(coyotedetections)) %>%
@@ -303,6 +320,10 @@ lynxdetections <- lynxdetections[common_sites, ]
 martendetections <- martendetections[common_sites, ]
 fisherdetections <- fisherdetections[common_sites, ]
 
+coyotedetections <- coyotedetections[rownames(coyotedetections) != "1095-SE",]
+lynxdetections <- lynxdetections[rownames(lynxdetections) != "1095-SE",]
+martendetections <- martendetections[rownames(martendetections) != "1095-SE",]
+fisherdetections <- fisherdetections[rownames(fisherdetections) != "1095-SE",]
 
 # filter covariates
 covariates_aligned <- covariates_aligned %>%
@@ -326,6 +347,7 @@ identical(rownames(fisherdetections), covariates_unique$location)
 ```
 
 ##Dimension reduction of climate data
+
 ```{r}
 ## Climate variables
 #1) Annual variables:
@@ -375,8 +397,6 @@ summary(pca_res)
 
 biplot(pca_res)
 
-autoplot(pca_res, data = climate_sites, colour = "Latitude",
-         loadings = TRUE, loadings.label = TRUE, loadings.label.size = 3)
 
 ##Extract PC's
 climate_pcs <- as.data.frame(pca_res$x[, 1:2])
@@ -388,6 +408,8 @@ round(pca_res$rotation[, 1:2], 3)
 # Bind with site info
 climate_sites <- cbind(covar_locations, climate_pcs)
 
+autoplot(pca_res, data = climate_sites, colour = "Latitude",
+         loadings = TRUE, loadings.label = TRUE, loadings.label.size = 3)
 # Plot
 ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
   geom_point(size = 3, color = "steelblue") +
@@ -399,7 +421,9 @@ ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
 
 
 ```
+
 ##Dimension reduction of ABMI human footprint data
+
 ```{r}
 
 ##Filter out humanfootprint covariates
@@ -444,7 +468,9 @@ ggplot(hf_sites, aes(x = PC1, y = PC2, label = location)) +
 
 
 ```
+
 ##Partitioning multi-species data for natural regions only where all four species are detected
+
 ```{r}
 ggplot(covariates_unique, aes(x = Longitude, y = Latitude, color = NR)) + 
   theme_minimal()+
@@ -456,20 +482,189 @@ ggplot(covariates_unique, aes(x = NR, fill = NR)) +
 
 
 ```
+
 ```{r}
 
 meso_reports_nr <- meso_reports %>%
   left_join(covariates_unique %>% select(location, NR),
             by = "location")
 
+species_list <- unique(meso_reports_nr$species_common_name)
+
+regions_with_all <- meso_reports_nr %>%
+  group_by(NR) %>%
+  summarise(species_present = list(unique(species_common_name))) %>%
+  filter(all(species_list %in% species_present)) %>%
+  pull(NR)
+
+detections_filtered <- meso_reports_nr %>%
+  filter(NR %in% regions_with_all)
+
+detections_summary <- meso_reports_nr %>%
+  group_by(NR, species_common_name) %>%
+  summarise(count = n(), .groups = "drop")
+
+
+ggplot(detections_summary, aes(x = NR, y = count, fill = species_common_name)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Species detections by natural region",
+       x = "Natural region",
+       y = "Number of detections",
+       fill = "Species") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+borealmesos_reports <- meso_reports_nr %>%
+  filter(NR == "Boreal")
+
+##Create detection tables for each focal species
+
+##Coyote
+coyotedetectionhistory_boreal<-detectionHistory(recordTable = borealmesos_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Coyote",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+
+coyotedetections_boreal<-coyotedetectionhistory_boreal$detection_history
+
+##Lynx
+lynxdetectionhistory_boreal<-detectionHistory(recordTable = borealmesos_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Canada Lynx",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+
+lynxdetections_boreal<-lynxdetectionhistory_boreal$detection_history
+
+
+##Marten
+martendetectionhistory_boreal<-detectionHistory(recordTable = borealmesos_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Marten",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+
+martendetections_boreal<-martendetectionhistory_boreal$detection_history
+
+##Fisher
+fisherdetectionhistory_boreal<-detectionHistory(recordTable = borealmesos_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Fisher",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+
+fisherdetections_boreal<-fisherdetectionhistory_boreal$detection_history
+
+# filter detections
+coyotedetections_boreal <- coyotedetections_boreal[common_sites, ]
+lynxdetections_boreal <- lynxdetections_boreal[common_sites, ]
+martendetections_boreal <- martendetections_boreal[common_sites, ]
+fisherdetections_boreal <- fisherdetections_boreal[common_sites, ]
+
+coyotedetections_boreal <- coyotedetections_boreal[rownames(coyotedetections_boreal) != "1095-SE",]
+lynxdetections_boreal <- lynxdetections_boreal[rownames(lynxdetections_boreal) != "1095-SE",]
+martendetections_boreal <- martendetections_boreal[rownames(martendetections_boreal) != "1095-SE",]
+fisherdetections_boreal <- fisherdetections_boreal[rownames(fisherdetections_boreal) != "1095-SE",]
+
+```
+
+##Canada Human Footprint index
+
+```{r}
+library(terra)
+library(geodata)
+
+# Load raster (human footprint TIFF) and crop to alberta provincial boundary
+hf_raster <- rast("data/chfi/cum_threat2020.02.18.tif")
+
+url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
+
+canada <- gadm("Canada", level = 1, path = "data/")
+alberta <- canada[canada$NAME_1 == "Alberta", ]
+alberta_proj <- project(alberta, hf_raster)
+
+hf_alberta <- crop(hf_raster, alberta_proj)
+hf_alberta_masked <- mask(hf_alberta, alberta_proj)
+
+# Convert sites to spatial object
+covar_locations <- covar_locations %>%
+  filter(!is.na(Longitude) & !is.na(Latitude))
+
+sites_hf <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
+sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
+sites_vect <- vect(sites_hf)
+
+buffers <- st_buffer(sites_hf, dist = 5000)
+buffers_vect <- vect(buffers)
+
+hf_vals <- extract(hf_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
+
+covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
+
+climate_sites <- climate_sites %>%
+  filter(location != ("1095-SE"))
 ```
 
 
+
+
 #Write CSV files
+
 ```{r}
 write.csv(covariates_unique, file = "data/ehscovars.csv", row.names = FALSE)
+write.csv(climate_sites, file = "data/climatecovars.csv", row.names = FALSE)
+write.csv(covar_locations_hf, file = "data/hfcovars.csv", row.names = FALSE)
+
 write.csv(coyotedetections, file = "data/coyotedetections.csv", row.names = FALSE)
 write.csv(lynxdetections, file = "data/lynxdetections.csv", row.names = FALSE)
 write.csv(martendetections, file = "data/martendetections.csv", row.names = FALSE)
 write.csv(fisherdetections, file = "data/fisherdetections.csv", row.names = FALSE)
+
+write.csv(coyotedetections_boreal, file = "data/coyotedetections_boreal.csv", row.names = FALSE)
+write.csv(lynxdetections_boreal, file = "data/lynxdetections_boreal.csv", row.names = FALSE)
+write.csv(martendetections_boreal, file = "data/martendetections_boreal.csv", row.names = FALSE)
+write.csv(fisherdetections_boreal, file = "data/fisherdetections_boreal.csv", row.names = FALSE)
+
+
 ```
