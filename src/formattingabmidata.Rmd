@@ -375,16 +375,17 @@ identical(rownames(fisherdetections), covariates_unique$location)
 #PET                Potential evapotranspiration
 
 ##Filter out climate covariates
+
 covariates_climate <- covariates_unique %>%
-  select(location, Latitude, Longitude, AHM, PET, FFP, MAP, MAT, MWMT, MCMT)
+  dplyr::select(location, Latitude, Longitude, AHM, PET, FFP, MAP, MAT, MWMT, MCMT)
 
 ##Keep location info
 covar_locations <- covariates_climate %>%
-  select(location, Latitude, Longitude)
+  dplyr::select(location, Latitude, Longitude)
 
 ##Climate variables only
 climate_var <- covariates_climate %>%
-    select(-location, -Latitude, -Longitude)
+    dplyr::select(-location, -Latitude, -Longitude)
 
 climate_scaled <- scale(climate_var)
 
@@ -409,7 +410,9 @@ round(pca_res$rotation[, 1:2], 3)
 climate_sites <- cbind(covar_locations, climate_pcs)
 
 autoplot(pca_res, data = climate_sites, colour = "Latitude",
-         loadings = TRUE, loadings.label = TRUE, loadings.label.size = 3)
+         loadings = TRUE, loadings.label = TRUE, loadings.label.size = 3)+
+  theme_classic()
+
 # Plot
 ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
   geom_point(size = 3, color = "steelblue") +
@@ -417,7 +420,8 @@ ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
   theme_minimal() +
   labs(title = "Sites in PCA Space",
        x = "PC1",
-       y = "PC2")
+       y = "PC2")+
+  theme_minimal()
 
 
 ```
@@ -634,6 +638,9 @@ covar_locations <- covar_locations %>%
 sites_hf <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
 sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
 sites_vect <- vect(sites_hf)
+
+plot(hf_alberta_masked)
+points(sites_vect, col = "red")
 
 buffers <- st_buffer(sites_hf, dist = 5000)
 buffers_vect <- vect(buffers)

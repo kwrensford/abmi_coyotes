@@ -23,6 +23,7 @@ library(cmdstanr)
 library(rjags)
 library(Rcpp)
 library(stringr)
+library(mgcv)
 ```
 
 #Formatting detection non-detection data
@@ -46,9 +47,13 @@ hf <- read.csv("data/hfcovars.csv")
 covars <- bind_cols(climate, hf[,4])
 
 covars<-rename(covars, hf = ...6)
+
+covars$PC1<-scale(covars$PC1)
+covars$PC2<-scale(covars$PC2)
+covars$hf<-scale(covars$hf)
 ```
 
-##Single Species
+##Single Species Coyote
 ```{r}
 umf_coyote <- unmarkedFrameOccu(
   y = coyote,
@@ -61,6 +66,28 @@ mod_coyote <- occu(
 )
 
 summary(mod_coyote)
+
+plotEffects(mod_coyote, type = "state", covariate = "hf")
+plotEffects(mod_coyote, type = "state", covariate = "PC1")
+plotEffects(mod_coyote, type = "state", covariate = "PC2")
+```
+##Single Species Lynx
+```{r}
+umf_canlynx <- unmarkedFrameOccu(
+  y = lynx,
+  siteCovs = covars
+)
+
+mod_canlynx <- occu(
+  formula = ~1 ~PC1*hf + PC2*hf, 
+  data = umf_canlynx
+)
+
+summary(mod_canlynx)
+
+plotEffects(mod_canlynx, type = "state", covariate = "hf")
+plotEffects(mod_canlynx, type = "state", covariate = "PC1")
+plotEffects(mod_canlynx, type = "state", covariate = "PC2")
 ```
 
 ##Occumulti approach - coyote lynx only
@@ -89,246 +116,400 @@ SE(mod_lynx)             # standard errors
 confint(mod_lynx, type = "state")        # confidence intervals
 ```
 
-##Marginal occupancy coyote-lynx
-```{r}
 
-```
+##Conditional occupancy lynx given coyote Climate pc1
 
-##Conditional occupancy coyote-lynx Climate pc1
+Plot low footprint vs high footprint for each climate variable. 
 ```{r}
-pc1data <- data.frame(
+##Climate PC1 low human footprint
+
+pc1data_lohf <- data.frame(
   PC1 = seq(min(covars$PC1, na.rm = TRUE),
            max(covars$PC1, na.rm = TRUE),
-           length.out = 100),
+           length.out = 1000),
   PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
-  hf = mean(covars$hf, na.rm = TRUE)
+  hf = quantile(covars$hf, 0.25, na.rm = TRUE)
 )
 
+# helper: smooth any boundary curve
+smooth_bounds <- function(x, y, k = 10) {
+  gamfit <- gam(y ~ s(x, k = k))
+  predict(gamfit, newdata = data.frame(x = x))
+}
 
-# Example: conditional occupancy of coyote given lynx present
-pred_cond <- predict(
+# Lynx occupancy given coyote present
+pred_lynx_present_pc1_lohf <- predict(
   mod_lynx,
   type = "state",
   species = "lynx",
   cond = "coyote",
-  newdata = pc1data    # a data.frame with covariates of interest
+  newdata = pc1data_lohf
 )
 
-# Coyote occupancy given lynx present
-pred_lynx_present <- predict(
-  mod_lynx,
-  type = "state",
-  species = "lynx",
-  cond = "coyote",
-  newdata = pc1data
-)
-
-# Coyote occupancy given lynx absent
-pred_lynx_absent <- predict(
+# Lynx occupancy given coyote absent
+pred_lynx_absent_pc1_lohf <- predict(
   mod_lynx,
   type = "state",
   species = "lynx",
   cond = "-coyote",   # the minus sign = species absent
-  newdata = pc1data
+  newdata = pc1data_lohf
 )
 
-df <- data.frame(
-  cov = pc1data$PC1,
-  present = pred_lynx_present$Predicted,
-  lower_present = pred_lynx_present$lower,
-  upper_present = pred_lynx_present$upper,
-  absent = pred_lynx_absent$Predicted,
-  lower_absent = pred_lynx_absent$lower,
-  upper_absent = pred_lynx_absent$upper
+df_pc1_lohf <- data.frame(
+  cov = pc1data_lohf$PC1,
+  present = pred_lynx_present_pc1_lohf$Predicted,
+  lower_present = pred_lynx_present_pc1_lohf$lower,
+  upper_present = pred_lynx_present_pc1_lohf$upper,
+  absent = pred_lynx_absent_pc1_lohf$Predicted,
+  lower_absent = pred_lynx_absent_pc1_lohf$lower,
+  upper_absent = pred_lynx_absent_pc1_lohf$upper
 )
 
 
-ggplot(df, aes(x = cov)) +
+ggplot(df_pc1_lohf, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Lynx occupancy probability",
-       x = "Human footprint",
+       x = "Climate PC1",
+       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)") +
+  theme_bw()
+
+
+```
+
+```{r}
+##Climate PC1 hi human footprint
+
+pc1data_hihf <- data.frame(
+  PC1 = seq(min(covars$PC1, na.rm = TRUE),
+           max(covars$PC1, na.rm = TRUE),
+           length.out = 1000),
+  PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.75, na.rm = TRUE)
+)
+
+
+# Lynx occupancy given coyote present
+pred_lynx_present_pc1_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = pc1data_hihf
+)
+
+# Lynx occupancy given coyote absent
+pred_lynx_absent_pc1_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "-coyote",   # the minus sign = species absent
+  newdata = pc1data_hihf
+)
+
+df_pc1_hihf <- data.frame(
+  cov = pc1data_hihf$PC1,
+  present = pred_lynx_present_pc1_hihf$Predicted,
+  lower_present = pred_lynx_present_pc1_hihf$lower,
+  upper_present = pred_lynx_present_pc1_hihf$upper,
+  absent = pred_lynx_absent_pc1_hihf$Predicted,
+  lower_absent = pred_lynx_absent_pc1_hihf$lower,
+  upper_absent = pred_lynx_absent_pc1_hihf$upper
+)
+
+
+ggplot(df_pc1_hihf, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Lynx occupancy probability",
+       x = "Climate PC1",
        title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
 
 
 ```
 
-##Conditional occupancy coyote-lynx Climate pc2
+##Conditional occupancy lynx given coyote Climate pc2
 ```{r}
-pc2data <- data.frame(
+##Climate PC2 low human footprint
+
+pc2data_lohf <- data.frame(
   PC2 = seq(min(covars$PC2, na.rm = TRUE),
            max(covars$PC2, na.rm = TRUE),
-           length.out = 100),
+           length.out = 1000),
   PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
-  hf = mean(covars$hf, na.rm = TRUE)
+  hf = quantile(covars$hf, 0.25, na.rm = TRUE)
 )
 
 
-# Example: conditional occupancy of coyote given lynx present
-pred_cond_pc2 <- predict(
+# Lynx occupancy given coyote present
+pred_lynx_present_pc2_lohf <- predict(
   mod_lynx,
   type = "state",
   species = "lynx",
   cond = "coyote",
-  newdata = pc2data    # a data.frame with covariates of interest
+  newdata = pc2data_lohf
 )
 
-# Coyote occupancy given lynx present
-pred_lynx_present_pc2 <- predict(
-  mod_lynx,
-  type = "state",
-  species = "lynx",
-  cond = "coyote",
-  newdata = pc2data
-)
-
-# Coyote occupancy given lynx absent
-pred_lynx_absent_pc2 <- predict(
+# Lynx occupancy given coyote absent
+pred_lynx_absent_pc2_lohf <- predict(
   mod_lynx,
   type = "state",
   species = "lynx",
   cond = "-coyote",   # the minus sign = species absent
-  newdata = pc2data
+  newdata = pc2data_lohf
 )
 
-df_pc2 <- data.frame(
-  cov = pc2data$PC2,
-  present = pred_lynx_present_pc2$Predicted,
-  lower_present = pred_lynx_present_pc2$lower,
-  upper_present = pred_lynx_present_pc2$upper,
-  absent = pred_lynx_absent_pc2$Predicted,
-  lower_absent = pred_lynx_absent_pc2$lower,
-  upper_absent = pred_lynx_absent_pc2$upper
+df_pc2_lohf <- data.frame(
+  cov = pc2data_lohf$PC2,
+  present = pred_lynx_present_pc2_lohf$Predicted,
+  lower_present = pred_lynx_present_pc2_lohf$lower,
+  upper_present = pred_lynx_present_pc2_lohf$upper,
+  absent = pred_lynx_absent_pc2_lohf$Predicted,
+  lower_absent = pred_lynx_absent_pc2_lohf$lower,
+  upper_absent = pred_lynx_absent_pc2_lohf$upper
 )
 
+df_pc2_lohf$upper_present_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$upper_present)
+df_pc2_lohf$lower_present_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$lower_present)
+df_pc2_lohf$upper_absent_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$upper_absent)
+df_pc2_lohf$lower_absent_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$lower_absent)
 
-ggplot(df_pc2, aes(x = cov)) +
+ggplot(df_pc2_lohf, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Lynx occupancy probability",
-       x = "Climate pc2",
-       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
-
-
-```
-
-##Conditional occupancy coyote-lynx Climate hf
-```{r}
-hfdata <- data.frame(
-  hf = seq(min(covars$hf, na.rm = TRUE),
-           max(covars$hf, na.rm = TRUE),
-           length.out = 100),
-  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
-  PC2 = mean(covars$PC2, na.rm = TRUE)
-)
-
-
-# Example: conditional occupancy of coyote given lynx present
-pred_cond_hf <- predict(
-  mod_lynx,
-  type = "state",
-  species = "lynx",
-  cond = "coyote",
-  newdata = hfdata    # a data.frame with covariates of interest
-)
-
-# Coyote occupancy given lynx present
-pred_lynx_present_hf <- predict(
-  mod_lynx,
-  type = "state",
-  species = "lynx",
-  cond = "coyote",
-  newdata = hfdata
-)
-
-# Coyote occupancy given lynx absent
-pred_lynx_absent_hf <- predict(
-  mod_lynx,
-  type = "state",
-  species = "lynx",
-  cond = "-coyote",   # the minus sign = species absent
-  newdata = hfdata
-)
-
-df_hf <- data.frame(
-  cov = hfdata$hf,
-  present = pred_lynx_present_hf$Predicted,
-  lower_present = pred_lynx_present_hf$lower,
-  upper_present = pred_lynx_present_hf$upper,
-  absent = pred_lynx_absent_hf$Predicted,
-  lower_absent = pred_lynx_absent_hf$lower,
-  upper_absent = pred_lynx_absent_hf$upper
-)
-
-
-ggplot(df_hf, aes(x = cov)) +
-  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
-  geom_line(aes(y = present), color = "blue") +
-  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
-  geom_line(aes(y = absent), color = "red") +
-  labs(y = "Lynx occupancy probability",
-       x = "Human footprint",
+       x = "Climate PC2",
        title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
 
 
 ```
 
 ```{r}
-newdata_coylynx <- data.frame(
-  PC1 = seq(min(covars$PC1), max(covars$PC1), length.out=50),
-  PC2 = mean(covars$PC2),
-  hf = mean(covars$hf)
+##Climate PC2 hi human footprint
+
+pc2data_hihf <- data.frame(
+  PC2 = seq(min(covars$PC2, na.rm = TRUE),
+           max(covars$PC2, na.rm = TRUE),
+           length.out = 1000),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.75, na.rm = TRUE)
 )
 
-pred_lynxcoy <- predict(mod_lynx, type = "state")
 
-psi_coy <- pred_lynxcoy$Predicted[,2] + pred_lynxcoy$Predicted[,1]
-psi_lynx <- pred_lynxcoy$Predicted[,3] + pred_lynxcoy$Predicted[,1]
-
-psi_lynx_given_coy <- pred_lynxcoy$Predicted[,1] / (pred_lynxcoy$Predicted[,3] + pred_lynxcoy$Predicted[,1])
-psi_lynx_given_no_coy <- pred_lynxcoy$Predicted[,3] / (pred_lynxcoy$Predicted[,4] + pred_lynxcoy$Predicted[,2])
-
-pred <- data.frame(
-  psi_coy = psi_coy,
-  psi_lynx = psi_lynx,
-  psi_lynx_given_coy,
-  psi_lynx_given_no_coy
+# Lynx occupancy given coyote present
+pred_lynx_present_pc2_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = pc2data_hihf
 )
 
-df_plot <-
+# Lynx occupancy given coyote absent
+pred_lynx_absent_pc2_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "-coyote",   # the minus sign = species absent
+  newdata = pc2data_hihf
+)
+
+df_pc2_hihf <- data.frame(
+  cov = pc2data_hihf$PC2,
+  present = pred_lynx_present_pc2_hihf$Predicted,
+  lower_present = pred_lynx_present_pc2_hihf$lower,
+  upper_present = pred_lynx_present_pc2_hihf$upper,
+  absent = pred_lynx_absent_pc2_hihf$Predicted,
+  lower_absent = pred_lynx_absent_pc2_hihf$lower,
+  upper_absent = pred_lynx_absent_pc2_hihf$upper
+)
+
+
+ggplot(df_pc2_hihf, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Lynx occupancy probability",
+       x = "Climate PC2",
+       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+
+
+```
+
+
+
+##Coyote occupancy from multi-species model. 
+```{r}
+##Climate PC1 low human footprint (coyote)
+
+pred_coyote_present_pc1_lohf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "lynx",
+  newdata = pc1data_lohf
+)
+
+pred_coyote_absent_pc1_lohf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "-lynx",
+  newdata = pc1data_lohf
+)
+
+df_pc1_lohf_coyote <- data.frame(
+  cov = pc1data_lohf$PC1,
+  present = pred_coyote_present_pc1_lohf$Predicted,
+  lower_present = pred_coyote_present_pc1_lohf$lower,
+  upper_present = pred_coyote_present_pc1_lohf$upper,
+  absent = pred_coyote_absent_pc1_lohf$Predicted,
+  lower_absent = pred_coyote_absent_pc1_lohf$lower,
+  upper_absent = pred_coyote_absent_pc1_lohf$upper
+)
+
+
+ggplot(df_pc1_lohf_coyote, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Coyote absent probability",
+       x = "Climate PC1",
+       title = "Coyote occupancy (lo human footprint)")
+
 ```
 
 
 ```{r}
-hf_range <- range(siteCovs(umf_lynx)$hf)
-hf_seq <- seq(hf_range[1], hf_range[2], length.out = 100)
+##Climate PC1 hi human footprint (coyote)
 
-PC1_mean <- mean(covars$PC1)
-PC2_mean <- mean(covars$PC2)
+pred_coyote_present_pc1_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "lynx",
+  newdata = pc1data_hihf
+)
 
-nd <- data.frame(PC1 = PC1_mean,
-                 PC2 = PC2_mean,
-                 hf = hf_seq
-                 )
+pred_coyote_absent_pc1_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "-lynx",
+  newdata = pc1data_hihf
+)
 
-occ_hf_coy <- predict(mod_lynx, type="state", species="coyote", newdata=nd)
-occ_hf_coy$Species <- "Coyote"
-occ_hf_coy$hf <- hf_seq
 
-head(occ_hf_coy)
+df_pc1_hihf_coyote <- data.frame(
+  cov = pc1data_hihf$PC1,
+  present = pred_coyote_present_pc1_hihf$Predicted,
+  lower_present = pred_coyote_present_pc1_hihf$lower,
+  upper_present = pred_coyote_present_pc1_hihf$upper,
+  absent = pred_coyote_absent_pc1_hihf$Predicted,
+  lower_absent = pred_coyote_absent_pc1_hihf$lower,
+  upper_absent = pred_coyote_absent_pc1_hihf$upper
+)
 
-occ_hf_lynx <- predict(mod_lynx, type="state", species="lynx", newdata=nd)
-occ_hf_lynx$Species <- "Lynx"
-occ_hf_lynx$hf <- hf_seq
 
-plot(occ_hf_coy$hf, occ_hf_coy$Predicted, type='l', ylim=c(0,1),
-     col='red', lwd=2, xlab="human footprint", ylab="Marginal occupancy")
-lines(occ_hf_lynx$hf, occ_hf_lynx$Predicted, col='blue', lwd=2)
+ggplot(df_pc1_hihf_coyote, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Coyote occupancy probability",
+       x = "Climate PC1",
+       title = "Coyote occupancy (hi human footprint)")+
+  theme_minimal()
 
+```
+```{r}
+##Climate PC2 low human footprint (coyote)
+
+pred_coyote_present_pc2_lohf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "lynx",
+  newdata = pc2data_lohf
+)
+
+pred_coyote_absent_pc2_lohf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "-lynx",
+  newdata = pc2data_lohf
+)
+
+df_pc2_lohf_coyote <- data.frame(
+  cov = pc2data_lohf$PC2,
+  present = pred_coyote_present_pc2_lohf$Predicted,
+  lower_present = pred_coyote_present_pc2_lohf$lower,
+  upper_present = pred_coyote_present_pc2_lohf$upper,
+  absent = pred_coyote_absent_pc2_lohf$Predicted,
+  lower_absent = pred_coyote_absent_pc2_lohf$lower,
+  upper_absent = pred_coyote_absent_pc2_lohf$upper
+)
+
+
+ggplot(df_pc2_lohf_coyote, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+  geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Coyote occupancy probability",
+       x = "Climate PC2",
+       title = "Coyote occupancy (lo human footprint)")+
+  theme_minimal()
+
+```
+```{r}
+##Climate PC2 hi human footprint (coyote)
+
+pred_coyote_present_pc2_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "lynx",
+  newdata = pc2data_hihf
+)
+
+pred_coyote_absent_pc2_hihf <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "-lynx",
+  newdata = pc2data_hihf
+)
+
+df_pc2_hihf_coyote <- data.frame(
+  cov = pc2data_hihf$PC2,
+  present = pred_coyote_present_pc2_hihf$Predicted,
+  lower_present = pred_coyote_present_pc2_hihf$lower,
+  upper_present = pred_coyote_present_pc2_hihf$upper,
+  absent = pred_coyote_absent_pc2_hihf$Predicted,
+  lower_absent = pred_coyote_absent_pc2_hihf$lower,
+  upper_absent = pred_coyote_absent_pc2_hihf$upper
+)
+
+
+ggplot(df_pc2_hihf_coyote, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = present), color = "blue") +
+   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = absent), color = "red") +
+  labs(y = "Coyote occupancy probability",
+       x = "Climate PC2",
+       title = "Coyote occupancy (hi human footprint)")+
+  theme_minimal()
 
 ```
 
