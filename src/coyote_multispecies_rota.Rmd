@@ -24,15 +24,22 @@ library(rjags)
 library(Rcpp)
 library(stringr)
 library(mgcv)
+library(cowplot)
+library(gridExtra)
 ```
 
 #Formatting detection non-detection data
 
 ```{r}
-coyote <- as.matrix(read.csv("data/coyotedetections_boreal.csv"))
-lynx <- as.matrix(read.csv("data/lynxdetections_boreal.csv"))
-marten <- as.matrix(read.csv("data/martendetections_boreal.csv"))
-fisher <- as.matrix(read.csv("data/fisherdetections_boreal.csv"))
+coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
+lynx <- as.matrix(read.csv("data/lynxdetections.csv"))
+marten <- as.matrix(read.csv("data/martendetections.csv"))
+fisher <- as.matrix(read.csv("data/fisherdetections.csv"))
+
+coyote[is.na(coyote)] <- 0 
+lynx[is.na(lynx)] <- 0 
+marten[is.na(marten)] <- 0 
+fisher[is.na(fisher)] <- 0 
 ```
 
 #Load in covariate data
@@ -61,8 +68,9 @@ umf_coyote <- unmarkedFrameOccu(
 )
 
 mod_coyote <- occu(
-  formula = ~1 ~PC1*hf + PC2*hf, 
-  data = umf_coyote
+  formula = ~1 ~PC1 + PC2, 
+  data = umf_coyote,
+  method = "BFGS"
 )
 
 summary(mod_coyote)
@@ -71,6 +79,84 @@ plotEffects(mod_coyote, type = "state", covariate = "hf")
 plotEffects(mod_coyote, type = "state", covariate = "PC1")
 plotEffects(mod_coyote, type = "state", covariate = "PC2")
 ```
+
+
+```{r}
+pc2data_lohf <- data.frame(
+  PC2 = seq(min(covars$PC2, na.rm = TRUE),
+           max(covars$PC2, na.rm = TRUE),
+           length.out = 1000),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.25, na.rm = TRUE)
+)
+
+pc2data_hihf <- data.frame(
+  PC2 = seq(min(covars$PC2, na.rm = TRUE),
+           max(covars$PC2, na.rm = TRUE),
+           length.out = 1000),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.75, na.rm = TRUE)
+)
+
+pred_coyote_pc2_lohf <- predict(
+  mod_coyote,
+  type = "state",
+  species = "coyote",
+  newdata = pc2data_lohf
+)
+
+pred_coyote_pc2_hihf <- predict(
+  mod_coyote,
+  type = "state",
+  species = "coyote",
+  newdata = pc2data_hihf
+)
+
+df_pc2_coyote <- data.frame(
+  cov = pc2data_lohf$PC2,
+  pred_lo = pred_coyote_pc2_lohf$Predicted,
+  lower_lo = pred_coyote_pc2_lohf$lower,
+  upper_lo = pred_coyote_pc2_lohf$upper,
+  pred_hi = pred_coyote_pc2_hihf$Predicted,
+  lower_hi = pred_coyote_pc2_hihf$lower,
+  upper_hi = pred_coyote_pc2_hihf$upper
+)
+
+hf_labels <-  c(pred_lo = "darkgreen", pred_hi = "darkorange3")
+
+coyote_pc2 <- ggplot(df_pc2_coyote, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_lo, ymax = upper_lo), fill = "darkgreen", alpha = 0.2) +
+  geom_line(aes(y = pred_lo), color = "darkgreen", linewidth = 1) +
+  geom_ribbon(aes(ymin = lower_hi, ymax = upper_hi), fill = "darkorange3", alpha = 0.2) +
+  geom_line(aes(y = pred_hi), color = "darkorange3", linewidth= 1) +
+  scale_color_manual(values = hf_labels) +
+  labs(y = "Coyote occupancy probability",
+       x = "Climate PC2",
+       title = "Coyote occupancy",
+       colors = "Human footprint")+
+  theme_classic()
+
+coyote_pc2
+```
+
+```{r}
+pc2data_lohf <- data.frame(
+  PC2 = seq(min(covars$PC2, na.rm = TRUE),
+           max(covars$PC2, na.rm = TRUE),
+           length.out = 1000),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.25, na.rm = TRUE)
+)
+
+pc2data_hihf <- data.frame(
+  PC2 = seq(min(covars$PC2, na.rm = TRUE),
+           max(covars$PC2, na.rm = TRUE),
+           length.out = 1000),
+  PC1 = mean(covars$PC1, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.75, na.rm = TRUE)
+)
+```
+
 ##Single Species Lynx
 ```{r}
 umf_canlynx <- unmarkedFrameOccu(
@@ -80,7 +166,8 @@ umf_canlynx <- unmarkedFrameOccu(
 
 mod_canlynx <- occu(
   formula = ~1 ~PC1*hf + PC2*hf, 
-  data = umf_canlynx
+  data = umf_canlynx,
+  method = "BFGS"
 )
 
 summary(mod_canlynx)
@@ -88,6 +175,44 @@ summary(mod_canlynx)
 plotEffects(mod_canlynx, type = "state", covariate = "hf")
 plotEffects(mod_canlynx, type = "state", covariate = "PC1")
 plotEffects(mod_canlynx, type = "state", covariate = "PC2")
+```
+##Single Species Marten
+```{r}
+umf_marten <- unmarkedFrameOccu(
+  y = marten,
+  siteCovs = covars
+)
+
+mod_marten <- occu(
+  formula = ~1 ~PC1 + PC2 + hf, 
+  data = umf_marten,
+  method = "BFGS"
+)
+
+summary(mod_marten)
+
+plotEffects(mod_marten, type = "state", covariate = "hf")
+plotEffects(mod_marten, type = "state", covariate = "PC1")
+plotEffects(mod_marten, type = "state", covariate = "PC2")
+```
+##Single Species Fisher
+```{r}
+umf_fisher <- unmarkedFrameOccu(
+  y = fisher,
+  siteCovs = covars
+)
+
+mod_fisher <- occu(
+  formula = ~1 ~PC1 + PC2 + hf, 
+  data = umf_fisher,
+  method = "BFGS"
+)
+
+summary(mod_fisher)
+
+plotEffects(mod_fisher, type = "state", covariate = "hf")
+plotEffects(mod_fisher, type = "state", covariate = "PC1")
+plotEffects(mod_fisher, type = "state", covariate = "PC2")
 ```
 
 ##Occumulti approach - coyote lynx only
@@ -99,8 +224,19 @@ ylist_lynx$lynx[is.na(ylist_lynx$lynx)] <- 0
 
 umf_lynx <- unmarkedFrameOccuMulti(y = ylist_lynx, siteCovs = covars)
 
-stateformulas_lynx <- c("~PC1*hf + PC2*hf", "~PC1*hf + PC2*hf", "~PC1*hf + PC2*hf")
+stateformulas_null <- c("~1", "~1", "~1")
+detformulas_null <-  c("~1", "~1")
+
+stateformulas_lynx <- c("~PC1 + hf", "~PC1 + hf", "~PC1 + hf")
 detformulas_lynx <-  c("~1", "~1")
+
+mod_null <- occuMulti(
+  detformulas = detformulas_null,
+  stateformulas = stateformulas_null,
+  data = umf_lynx,
+  method = "BFGS",
+  se =TRUE
+)
 
 mod_lynx <- occuMulti(
   detformulas = detformulas_lynx,
@@ -110,13 +246,144 @@ mod_lynx <- occuMulti(
   se =TRUE
 )
 
+
 summary(mod_lynx)
 coef(mod_lynx)
 SE(mod_lynx)             # standard errors
 confint(mod_lynx, type = "state")        # confidence intervals
 ```
 
+```{r}
+# 1. helper functions
+logit <- function(p) qlogis(pmax(pmin(p, 0.999), 0.001))
 
+# 2. calculate naive occupancy/detection from your matrices (replace y1,y2 and n_surveys)
+psi_hat1 <- mean(rowSums(coyote) > 0)     # coyote
+psi_hat2 <- mean(rowSums(lynx) > 0)     # lynx
+p_hat1   <- mean(rowSums(coyote)[rowSums(coyote)>0] / ncol(coyote), na.rm = TRUE)
+p_hat2   <- mean(rowSums(lynx)[rowSums(lynx)>0] / ncol(lynx), na.rm = TRUE)
+p_hat1[is.na(p_hat1)] <- 0.05
+p_hat2[is.na(p_hat2)] <- 0.05
+
+# 3. Create a named vector matching full_names
+starts_named <- setNames(rep(0, length(full_names)), full_names)
+
+# Now fill sensible values for things we recognise in the names
+# Example name patterns you might see (inspect full_names to adapt):
+# "[coyote] (Intercept)", "[coyote] hf", "[lynx] (Intercept)", "[lynx] hf",
+# "[coyote:lynx] (Intercept)", "[coyote:lynx] hf", "[coyote] p(Intercept)", etc.
+# Below uses grepl to detect substrings — adapt to your actual names
+
+# occupancy intercepts
+if(any(grepl("\\[coyote\\].*Intercept", full_names))){
+  starts_named[grepl("\\[coyote\\].*Intercept", full_names)] <- logit(psi_hat1)
+}
+if(any(grepl("\\[lynx\\].*Intercept", full_names))){
+  starts_named[grepl("\\[lynx\\].*Intercept", full_names)] <- logit(psi_hat2)
+}
+
+# detection intercepts (often named in 'det' part; inspect exact pattern in full_names)
+if(any(grepl("\\[coyote\\].*p\\(Intercept\\)|\\[coyote\\] p.*Intercept", full_names))){
+  starts_named[grepl("\\[coyote\\].*p\\(Intercept\\)|\\[coyote\\] p.*Intercept", full_names)] <- logit(p_hat1)
+} else if(any(grepl("\\[coyote\\] \\(Intercept\\)\\.p", full_names))){ 
+  # alternate naming schemes — inspect and adapt
+  starts_named[grepl("\\[coyote\\] \\(Intercept\\)\\.p", full_names)] <- logit(p_hat1)
+}
+
+if(any(grepl("\\[lynx\\].*p\\(Intercept\\)|\\[lynx\\] p.*Intercept", full_names))){
+  starts_named[grepl("\\[lynx\\].*p\\(Intercept\\)|\\[lynx\\] p.*Intercept", full_names)] <- logit(p_hat2)
+}
+
+# interaction parameters -> set to small value (0 or 0.01)
+if(any(grepl("coyote:lynx", full_names) | grepl("lynx:coyote", full_names))){
+  starts_named[grepl("coyote:lynx", full_names) | grepl("lynx:coyote", full_names)] <- 0.0
+}
+
+# slopes: leave zeros (or put small values) — already zero by default
+
+# Final numeric vector to pass to occuMulti (remove names)
+start_vals <- unname(starts_named)
+```
+
+##Conditional occupancy lynx given coyote
+```{r}
+lynxocond_data <- data.frame(
+  PC1 = mean(covars$PC1, na.rm = TRUE),
+  PC2 = mean(covars$PC2, na.rm = TRUE),
+  hf = mean(covars$hf, na.rm = TRUE)
+)
+
+pred_lynx_present <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "coyote",
+  newdata = lynxocond_data
+)
+
+pred_lynx_absent <- predict(
+  mod_lynx,
+  type = "state",
+  species = "lynx",
+  cond = "-coyote",
+  newdata = lynxocond_data
+)
+
+df_lynxcond <- data.frame(
+  coyote =  c("Present", "Absent"),
+  est = c(pred_lynx_present$Predicted, pred_lynx_absent$Predicted),
+  lower = c(pred_lynx_present$lower, pred_lynx_absent$lower),
+  upper = c(pred_lynx_present$upper, pred_lynx_absent$upper)
+)
+
+lynxcond_plot <- ggplot(df_lynxcond, aes(x = coyote, y = est))+
+  geom_point()+
+  geom_errorbar(aes(ymin = lower, ymax = upper, width = 0.1))+
+  labs(x = "Coyote occupancy status",
+       y = "Conditional occupancy of lynx",
+       title = "Lynx occupancy conditional on coyote presence")+
+  ylim(0,1)+
+  theme_classic()
+
+lynxcond_plot
+```
+
+##Conditional occupancy coyote given lynx
+```{r}
+pred_coyote_present <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "lynx",
+  newdata = lynxocond_data
+)
+
+pred_coyote_absent <- predict(
+  mod_lynx,
+  type = "state",
+  species = "coyote",
+  cond = "-lynx",
+  newdata = lynxocond_data
+)
+
+df_coyotecond <- data.frame(
+  lynx =  c("Present", "Absent"),
+  est = c(pred_coyote_present$Predicted, pred_coyote_absent$Predicted),
+  lower = c(pred_coyote_present$lower, pred_coyote_absent$lower),
+  upper = c(pred_coyote_present$upper, pred_coyote_absent$upper)
+)
+
+coyotecond_plot <- ggplot(df_coyotecond, aes(x = lynx, y = est))+
+  geom_point()+
+  geom_errorbar(aes(ymin = lower, ymax = upper, width = 0.1))+
+  labs(x = "Lynx occupancy status",
+       y = "Conditional occupancy of coyote",
+       title = "Coyote occupancy conditional on lynx presence")+
+  ylim(0,1)+
+  theme_classic()
+
+coyotecond_plot
+```
 ##Conditional occupancy lynx given coyote Climate pc1
 
 Plot low footprint vs high footprint for each climate variable. 
@@ -166,17 +433,17 @@ df_pc1_lohf <- data.frame(
 )
 
 
-ggplot(df_pc1_lohf, aes(x = cov)) +
+lynxcoyote_pc1_lohf <- ggplot(df_pc1_lohf, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Lynx occupancy probability",
        x = "Climate PC1",
-       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)") +
-  theme_bw()
+       title = "Lynx occupancy conditional on coyote (lo hf)") +
+  theme_classic()
 
-
+lynxcoyote_pc1_lohf
 ```
 
 ```{r}
@@ -220,16 +487,17 @@ df_pc1_hihf <- data.frame(
 )
 
 
-ggplot(df_pc1_hihf, aes(x = cov)) +
+lynxcoyote_pc1_hihf <- ggplot(df_pc1_hihf, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Lynx occupancy probability",
        x = "Climate PC1",
-       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+       title = "Lynx occupancy conditional on coyote (hi hf)")+
+  theme_classic()
 
-
+lynxcoyote_pc1_hihf
 ```
 
 ##Conditional occupancy lynx given coyote Climate pc2
@@ -278,16 +546,17 @@ df_pc2_lohf$lower_present_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$l
 df_pc2_lohf$upper_absent_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$upper_absent)
 df_pc2_lohf$lower_absent_smooth <- smooth_bounds(df_pc2_lohf$cov, df_pc2_lohf$lower_absent)
 
-ggplot(df_pc2_lohf, aes(x = cov)) +
+lynxcoyote_pc2_lohf <- ggplot(df_pc2_lohf, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Lynx occupancy probability",
        x = "Climate PC2",
-       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+       title = "Lynx occupancy conditional on coyote (lo hf)")+
+  theme_classic()
 
-
+lynxcoyote_pc2_lohf
 ```
 
 ```{r}
@@ -331,16 +600,23 @@ df_pc2_hihf <- data.frame(
 )
 
 
-ggplot(df_pc2_hihf, aes(x = cov)) +
+lynxcoyote_pc2_hihf <- ggplot(df_pc2_hihf, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Lynx occupancy probability",
        x = "Climate PC2",
-       title = "Lynx occupancy conditional on coyote presence (blue) vs absence (red)")
+       title = "Lynx occupancy conditional on coyote (hihf)")+
+  theme_classic()
 
+lynxcoyote_pc2_hihf
+```
 
+```{r}
+
+##Multi panel plot of lynx-coyote
+grid.arrange(lynxcoyote_pc1_lohf, lynxcoyote_pc2_lohf, lynxcoyote_pc1_hihf, lynxcoyote_pc2_hihf, nrow = 2)
 ```
 
 
@@ -376,15 +652,17 @@ df_pc1_lohf_coyote <- data.frame(
 )
 
 
-ggplot(df_pc1_lohf_coyote, aes(x = cov)) +
+coyotelynx_pc1_lohf <- ggplot(df_pc1_lohf_coyote, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
   geom_line(aes(y = absent), color = "red") +
   labs(y = "Coyote absent probability",
        x = "Climate PC1",
-       title = "Coyote occupancy (lo human footprint)")
+       title = "Coyote occupancy (lo human footprint)")+
+  theme_classic()
 
+coyotelynx_pc1_lohf
 ```
 
 
@@ -419,7 +697,7 @@ df_pc1_hihf_coyote <- data.frame(
 )
 
 
-ggplot(df_pc1_hihf_coyote, aes(x = cov)) +
+coyotelynx_pc1_hihf <- ggplot(df_pc1_hihf_coyote, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
@@ -427,8 +705,9 @@ ggplot(df_pc1_hihf_coyote, aes(x = cov)) +
   labs(y = "Coyote occupancy probability",
        x = "Climate PC1",
        title = "Coyote occupancy (hi human footprint)")+
-  theme_minimal()
+  theme_classic()
 
+coyotelynx_pc1_hihf
 ```
 ```{r}
 ##Climate PC2 low human footprint (coyote)
@@ -460,7 +739,7 @@ df_pc2_lohf_coyote <- data.frame(
 )
 
 
-ggplot(df_pc2_lohf_coyote, aes(x = cov)) +
+coyotelynx_pc2_lohf <- ggplot(df_pc2_lohf_coyote, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
   geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
@@ -468,8 +747,9 @@ ggplot(df_pc2_lohf_coyote, aes(x = cov)) +
   labs(y = "Coyote occupancy probability",
        x = "Climate PC2",
        title = "Coyote occupancy (lo human footprint)")+
-  theme_minimal()
+  theme_classic()
 
+coyotelynx_pc2_lohf
 ```
 ```{r}
 ##Climate PC2 hi human footprint (coyote)
@@ -501,7 +781,7 @@ df_pc2_hihf_coyote <- data.frame(
 )
 
 
-ggplot(df_pc2_hihf_coyote, aes(x = cov)) +
+coyotelynx_pc2_hihf <- ggplot(df_pc2_hihf_coyote, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_present, ymax = upper_present), fill = "blue", alpha = 0.2) +
   geom_line(aes(y = present), color = "blue") +
    geom_ribbon(aes(ymin = lower_absent, ymax = upper_absent), fill = "red", alpha = 0.2) +
@@ -509,8 +789,15 @@ ggplot(df_pc2_hihf_coyote, aes(x = cov)) +
   labs(y = "Coyote occupancy probability",
        x = "Climate PC2",
        title = "Coyote occupancy (hi human footprint)")+
-  theme_minimal()
+  theme_classic()
 
+coyotelynx_pc2_hihf
+```
+
+```{r}
+
+##Multi panel plot of lynx-coyote
+grid.arrange(coyotelynx_pc1_lohf, coyotelynx_pc2_lohf, coyotelynx_pc1_hihf, coyotelynx_pc2_hihf, nrow = 2)
 ```
 
 ##Occumulti approach - all species

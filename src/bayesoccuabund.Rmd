@@ -1,0 +1,92 @@
+---
+title: "Abundance Modelling"
+author: "Kwasi Wrensford"
+date: "2025-11-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(MASS)
+library(hms)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(stars)
+library(sf)
+library(terra)
+library(rstan)
+library(cmdstanr)
+library(rjags)
+library(Rcpp)
+library(stringr)
+library(mgcv)
+library(cowplot)
+library(gridExtra)
+library(ubms)
+```
+
+```{r}
+
+```
+
+#Formatting detection non-detection data
+
+```{r}
+coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
+lynx <- as.matrix(read.csv("data/lynxdetections.csv"))
+marten <- as.matrix(read.csv("data/martendetections.csv"))
+fisher <- as.matrix(read.csv("data/fisherdetections.csv"))
+
+coyote[is.na(coyote)] <- 0 
+lynx[is.na(lynx)] <- 0 
+marten[is.na(marten)] <- 0 
+fisher[is.na(fisher)] <- 0 
+```
+
+#Load in covariate data
+
+```{r}
+climate <- read.csv("data/climatecovars.csv")
+hf <- read.csv("data/hfcovars.csv")
+```
+
+```{r}
+covars <- bind_cols(climate, hf[,4])
+
+covars<-rename(covars, hf = ...6)
+
+covars$PC1<-scale(covars$PC1)
+covars$PC2<-scale(covars$PC2)
+covars$hf<-scale(covars$hf)
+```
+
+##Single Species Coyote
+```{r}
+umf_coyote <- unmarkedFrameOccu(
+  y = coyote,
+  siteCovs = covars
+)
+
+mod_coyote <- stan_occu(
+  formula = ~1 ~PC1*hf + PC2*hf, 
+  data = umf_coyote,
+  chains = 3,
+  iter = 500
+)
+
+mod_coyote
+
+plotEffects(mod_coyote, type = "state", covariate = "hf")
+plotEffects(mod_coyote, type = "state", covariate = "PC1")
+plotEffects(mod_coyote, type = "state", covariate = "PC2")
+```
