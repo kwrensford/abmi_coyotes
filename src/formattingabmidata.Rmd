@@ -278,7 +278,7 @@ invalid_entries
 ##Coyote
 coyotedetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          camOp = camera_operation_matrix,
-                                         stationCol = "location",
+                                         stationCol = "location_id",
                                          speciesCol = "species_common_name",
                                          recordDateTimeCol = "image_date_time",
                                          recordDateTimeFormat = "ymd_HMS",
@@ -372,7 +372,8 @@ coyoteabundancehistory <-detectionHistory(recordTable = study_main_reports,
                                          unmarkedMultFrameInput = TRUE
                                          )
 
-coyoteabundance <-coyotedetectionhistory$detection_history
+coyotecounts <-coyoteabundancehistory$detection_history
+write.csv(coyotecounts, file = "data/coyotecounts.csv", row.names = FALSE)
 
 ##Lynx
 lynxabundancehistory <- detectionHistory(recordTable = study_main_reports,
@@ -390,7 +391,7 @@ lynxabundancehistory <- detectionHistory(recordTable = study_main_reports,
                                          timeZone = "America/Edmonton",
                                          unmarkedMultFrameInput = TRUE
                                          )
-lynxdetections<-lynxdetectionhistory$detection_history
+lynxcounts <-lynxabundancehistory$detection_history
 
 
 ##Marten
@@ -647,6 +648,52 @@ covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 climate_sites <- climate_sites %>%
   filter(location != ("1095-SE"))
 ```
+#Disentangle hf variables
+
+##Roads
+```{r}
+# Load raster (human footprint TIFF) and crop to alberta provincial boundary
+hf_raster <- rast("data/chfi/cum_threat2020.02.18.tif")
+
+url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
+
+canada <- gadm("Canada", level = 1, path = "data/")
+alberta <- canada[canada$NAME_1 == "Alberta", ]
+alberta_proj <- project(alberta, hf_raster)
+
+hf_alberta <- crop(hf_raster, alberta_proj)
+hf_alberta_masked <- mask(hf_alberta, alberta_proj)
+
+# Convert sites to spatial object
+covar_locations <- covar_locations %>%
+  filter(!is.na(Longitude) & !is.na(Latitude))
+
+sites_hf <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
+sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
+sites_vect <- vect(sites_hf)
+
+plot(hf_alberta_masked)
+points(sites_vect, col = "")
+
+buffers <- st_buffer(sites_hf, dist = 5000)
+buffers_vect <- vect(buffers)
+
+hf_vals <- terra::extract(hf_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
+
+covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
+
+climate_sites <- climate_sites %>%
+  filter(location != ("1095-SE"))
+```
+
+##Rail
+
+##Forestry
+
+#Cropland
+
+#Pasture
+
 
 #Write CSV files
 

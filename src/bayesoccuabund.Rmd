@@ -7,6 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
 ```
 
 ```{r}
@@ -25,8 +26,6 @@ library(stars)
 library(sf)
 library(terra)
 library(rstan)
-library(cmdstanr)
-library(rjags)
 library(Rcpp)
 library(stringr)
 library(mgcv)
@@ -36,21 +35,18 @@ library(ubms)
 ```
 
 ```{r}
-
+getwd()
 ```
 
-#Formatting detection non-detection data
+#Formatting count data
 
 ```{r}
+getwd()
 coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
-lynx <- as.matrix(read.csv("data/lynxdetections.csv"))
-marten <- as.matrix(read.csv("data/martendetections.csv"))
-fisher <- as.matrix(read.csv("data/fisherdetections.csv"))
+coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
+
 
 coyote[is.na(coyote)] <- 0 
-lynx[is.na(lynx)] <- 0 
-marten[is.na(marten)] <- 0 
-fisher[is.na(fisher)] <- 0 
 ```
 
 #Load in covariate data
@@ -70,23 +66,34 @@ covars$PC2<-scale(covars$PC2)
 covars$hf<-scale(covars$hf)
 ```
 
-##Single Species Coyote
+##Frequentist N-mixture in unmarked
 ```{r}
-umf_coyote <- unmarkedFrameOccu(
-  y = coyote,
+umf_coyote <- unmarkedFramePCount(
+  y = coyotecounts,
   siteCovs = covars
 )
 
-mod_coyote <- stan_occu(
-  formula = ~1 ~PC1*hf + PC2*hf, 
-  data = umf_coyote,
-  chains = 3,
-  iter = 500
+coyote_nmix <- pcount(
+formula = ~ 1 ~ 
+  PC1 * hf + PC2 * hf,
+data = umf_coyote,
+mixture = "P"
 )
 
-mod_coyote
+coyote_nmix
+plotEffects(coyote_nmix, type = "state", covariate = "PC1")
+plotEffects(coyote_nmix, type = "state", covariate = "PC2")
+plotEffects(coyote_nmix, type = "state", covariate = "hf")
+```
 
-plotEffects(mod_coyote, type = "state", covariate = "hf")
-plotEffects(mod_coyote, type = "state", covariate = "PC1")
-plotEffects(mod_coyote, type = "state", covariate = "PC2")
+#Stan N-mixture using ubms
+```{r}
+coyote_nmix_stan <- stan_pcount(formula =  ~ 1 ~ 
+                       PC1 * hf + PC2 * hf,
+                     data = umf_coyote,
+                     chains = 3,
+                     iter = 500)
+
+coyote_nmix_stan
+plot_effects(coyote_nmix_stan, submodel = "state")
 ```
