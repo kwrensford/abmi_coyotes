@@ -2,6 +2,10 @@
 title: "coyote_multispecies_rota"
 output: html_document
 ---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
 
 ```{r}
 library(vroom)
@@ -31,6 +35,7 @@ library(gridExtra)
 #Formatting detection non-detection data
 
 ```{r}
+
 coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
 lynx <- as.matrix(read.csv("data/lynxdetections.csv"))
 marten <- as.matrix(read.csv("data/martendetections.csv"))
@@ -68,7 +73,7 @@ umf_coyote <- unmarkedFrameOccu(
 )
 
 mod_coyote <- occu(
-  formula = ~1 ~PC1 + PC2, 
+  formula = ~1 ~ PC1*hf + PC2*hf, 
   data = umf_coyote,
   method = "BFGS"
 )
