@@ -27,6 +27,7 @@ library(exactextractr)
 library(xml2)
 library(arcgislayers)
 library(geodata)
+library(viridis)
 ```
 
 ##Read in and format camera data
@@ -68,23 +69,6 @@ study_main_reports <- study_main_reports %>%
          | species_common_name == "Canada Lynx" 
          | species_common_name == "Marten"
          | species_common_name == "Fisher")
-
-
-##Segment Data for each Year
-main_reports_2015<-all_main_reports%>%
-  filter(year==2015)
-
-main_reports_2016<-all_main_reports%>%
-  filter(year==2016)
-
-main_reports_2017<-all_main_reports%>%
-  filter(year==2017)
-
-main_reports_2018<-all_main_reports%>%
-  filter(year==2018)
-
-main_reports_2019<-all_main_reports%>%
-  filter(year==2019)
 
 #Camera effort data
 total_operation_days<- vroom::vroom("data/Total Days of Operations ABMI EH 2014-2020.csv")
@@ -185,7 +169,7 @@ ggplot(detections_summary, aes(x = NR, y = count, fill = species_common_name)) +
        fill = "Species") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-study_main_reports <- study_main_reports %>%
+boreal_main_reports <- study_main_reports %>%
   filter(NR == "Boreal")
 ```
 
@@ -562,52 +546,6 @@ ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
 
 ```
 
-##Dimension reduction of ABMI human footprint data
-
-```{r}
-
-##Filter out humanfootprint covariates
-covariates_hf <- covariates_unique %>%
-  select(location, Latitude, Longitude, UrbanIndustrial_buf:Canals_buf)
-
-covariates_hf <- covariates_hf %>%
-  select(-PeatMine_buf)
-##hf variables only
-hf_var <- covariates_hf %>%
-    select(-location, -Latitude, -Longitude)
-
-hf_var_clean <- na.omit(hf_var)
-
-hf_scaled <- scale(hf_var_clean)
-
-##Run PCA
-pca_hf <- prcomp(hf_scaled, center = TRUE, scale. = TRUE)
-
-plot(pca_hf, type = "lines")
-
-summary(pca_hf)
-
-##Extract PC's
-hf_pcs <- as.data.frame(pca_hf$x[, 1:2])
-colnames(hf_pcs) <- c("PC1", "PC2")
-
-# Loadings (variable contributions to PCs)
-round(pca_hf$rotation[, 1:2], 3)
-
-# Bind with site info
-hf_sites <- cbind(covar_locations, climate_pcs)
-
-# Plot
-ggplot(hf_sites, aes(x = PC1, y = PC2, label = location)) +
-  geom_point(size = 3, color = "steelblue") +
-  geom_text(vjust = -0.5, size = 3) +
-  theme_minimal() +
-  labs(title = "Sites in PCA Space",
-       x = "PC1",
-       y = "PC2")
-
-
-```
 
 ##Canada Human Footprint index
 
@@ -647,7 +585,79 @@ covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 
 climate_sites <- climate_sites %>%
   filter(location != ("1095-SE"))
+
+covars <- climate_sites %>%
+  mutate(hf = covar_locations_hf$...4)
 ```
+
+#PC1 variation across province
+```{r}
+sites_joined <- merge(sites_vect, covars, by = "location")
+
+sites_joined$PC1<-as.numeric(sites_joined$PC1)
+sites_joined$PC2<-as.numeric(sites_joined$PC2)
+sites_joined$hf<-as.numeric(sites_joined$hf)
+
+mapview(
+  sites_joined,
+  zcol = "PC1",         # variable used to color the points
+  cex = 6,                   # point size
+  legend = TRUE, 
+  col.regions = viridis(20), # continuous palette
+  layer.name = "Climate covariate"
+)
+
+mapview(
+  sites_joined,
+  zcol = "PC2",         # variable used to color the points
+  cex = 6,                   # point size
+  legend = TRUE, 
+  col.regions = viridis(20), # continuous palette
+  layer.name = "Climate covariate"
+)
+
+mapview(
+  sites_joined,
+  zcol = "hf",         # variable used to color the points
+  cex = 6,                   # point size
+  legend = TRUE, 
+  col.regions = viridis(20), # continuous palette
+  layer.name = "Climate covariate"
+)
+```
+
+#Covariate data exploration
+```{r}
+#Correlation between human footprint and PC1
+cor.test(covars$PC1, covars$hf)
+
+summary(lm(data= covars, PC1 ~ hf))
+
+#Correlation between human footprint and PC2
+cor.test(covars$PC2, covars$hf)
+
+#Correlation between latitude and PC1
+cor.test(covars$Latitude, covars$PC1)
+
+#Correlation between latitude and PC2
+cor.test(covars$Latitude, covars$PC2)
+```
+
+#Raw coyote counts
+```{r}
+counts_per_site <- rowSums(coyotedetections, na.rm = TRUE)
+counts_per_site
+
+coyote_covars <- covars %>%
+  mutate(coyote_counts = counts_per_site)
+
+plot(coyote_covars$PC1, coyote_covars$coyote_counts)
+
+plot(coyote_covars$PC2, coyote_covars$coyote_counts)
+
+plot(coyote_covars$hf, coyote_covars$coyote_counts)
+```
+
 #Disentangle hf variables
 
 ##Roads
