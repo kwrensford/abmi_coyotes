@@ -25,7 +25,6 @@ library(mapview)
 library(sf)
 library(exactextractr)
 library(xml2)
-library(arcgislayers)
 library(geodata)
 library(viridis)
 ```
@@ -359,6 +358,27 @@ coyoteabundancehistory <-detectionHistory(recordTable = study_main_reports,
 coyotecounts <-coyoteabundancehistory$detection_history
 write.csv(coyotecounts, file = "data/coyotecounts.csv", row.names = FALSE)
 
+##Coyote boreal
+coyoteabundancehistory_boreal <-detectionHistory(recordTable = boreal_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         output = "count",
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Coyote",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+
+coyotecounts_boreal <-coyoteabundancehistory_boreal$detection_history
+write.csv(coyotecounts, file = "data/coyotecounts_boreal.csv", row.names = FALSE)
+
 ##Lynx
 lynxabundancehistory <- detectionHistory(recordTable = study_main_reports,
                                          camOp = camera_operation_matrix,
@@ -436,6 +456,8 @@ common_sites <- intersect(sites_det, sites_cov)
 
 # filter detections
 coyotedetections <- coyotedetections[common_sites, ]
+coyotecounts_boreal <- coyotecounts_boreal[common_sites,]
+coyotecounts <- coyotecounts[common_sites, ]
 lynxdetections <- lynxdetections[common_sites, ]
 martendetections <- martendetections[common_sites, ]
 fisherdetections <- fisherdetections[common_sites, ]
@@ -574,7 +596,7 @@ sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
 sites_vect <- vect(sites_hf)
 
 plot(hf_alberta_masked)
-points(sites_vect, col = "")
+points(sites_vect, col = "orange")
 
 buffers <- st_buffer(sites_hf, dist = 5000)
 buffers_vect <- vect(buffers)
@@ -592,37 +614,38 @@ covars <- climate_sites %>%
 
 #PC1 variation across province
 ```{r}
-sites_joined <- merge(sites_vect, covars, by = "location")
+sites_joined <- merge(sites_vect, coyote_covars, by = "location")
 
 sites_joined$PC1<-as.numeric(sites_joined$PC1)
 sites_joined$PC2<-as.numeric(sites_joined$PC2)
 sites_joined$hf<-as.numeric(sites_joined$hf)
+sites_joined$coyote_counts <-as.numeric(sites_joined$coyote_counts)
 
 mapview(
   sites_joined,
   zcol = "PC1",         # variable used to color the points
-  cex = 6,                   # point size
+  cex = "coyote_counts",                   # point size
   legend = TRUE, 
   col.regions = viridis(20), # continuous palette
-  layer.name = "Climate covariate"
+  layer.name = "Climate PC1"
 )
 
 mapview(
   sites_joined,
   zcol = "PC2",         # variable used to color the points
-  cex = 6,                   # point size
+  cex = "coyote_counts",                   # point size
   legend = TRUE, 
   col.regions = viridis(20), # continuous palette
-  layer.name = "Climate covariate"
+  layer.name = "Climate PC2"
 )
 
 mapview(
   sites_joined,
   zcol = "hf",         # variable used to color the points
-  cex = 6,                   # point size
+  cex = "coyote_counts",                   # point size
   legend = TRUE, 
   col.regions = viridis(20), # continuous palette
-  layer.name = "Climate covariate"
+  layer.name = "Human footprint"
 )
 ```
 

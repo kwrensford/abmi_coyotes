@@ -32,6 +32,7 @@ library(mgcv)
 library(cowplot)
 library(gridExtra)
 library(ubms)
+library(multiNmix)
 ```
 
 ```{r}
@@ -44,9 +45,9 @@ getwd()
 getwd()
 coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
 coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
+coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts.csv"))
 
-
-coyote[is.na(coyote)] <- 0 
+dimcoyote[is.na(coyote)] <- 0 
 ```
 
 #Load in covariate data
@@ -64,6 +65,9 @@ covars<-rename(covars, hf = ...6)
 covars$PC1<-scale(covars$PC1)
 covars$PC2<-scale(covars$PC2)
 covars$hf<-scale(covars$hf)
+
+covars_boreal <- covars[covars$location %in% rownames(coyotecounts_boreal), ]
+
 ```
 
 ##Frequentist N-mixture in unmarked
@@ -84,6 +88,24 @@ coyote_nmix
 plotEffects(coyote_nmix, type = "state", covariate = "PC1")
 plotEffects(coyote_nmix, type = "state", covariate = "PC2")
 plotEffects(coyote_nmix, type = "state", covariate = "hf")
+```
+```{r}
+umf_coyote_boreal <- unmarkedFramePCount(
+  y = coyotecounts_boreal,
+  siteCovs = covars
+)
+
+coyote_nmix_boreal <- pcount(
+formula = ~ 1 ~ 
+  PC1 * hf + PC2 * hf,
+data = umf_coyote_boreal,
+mixture = "P"
+)
+
+coyote_nmix_boreal
+plotEffects(coyote_nmix_boreal, type = "state", covariate = "PC1")
+plotEffects(coyote_nmix_boreal, type = "state", covariate = "PC2")
+plotEffects(coyote_nmix_boreal, type = "state", covariate = "hf")
 ```
 
 #Stan N-mixture using ubms
