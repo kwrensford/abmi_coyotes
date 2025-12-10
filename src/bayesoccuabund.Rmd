@@ -34,6 +34,8 @@ library(gridExtra)
 library(ubms)
 library(spAbundance)
 library(spOccupancy)
+library(MCMCvis)
+library(forestplot)
 ```
 
 ```{r}
@@ -148,11 +150,17 @@ plotEffects(fisher_nmix, type = "state", covariate = "hf")
 
 #Stan N-mixture using ubms
 ```{r}
-coyote_nmix_stan <- stan_pcount(formula =  ~ baited + (1 | cam_orientation) ~ 
+umf_coyote <- unmarkedFramePCount(
+  y = coyotecounts,
+  siteCovs = covars
+)
+
+coyote_nmix_stan <- stan_pcount(formula =  ~ baited  ~ 
                        PC1 * hf + PC2 * hf,
                      data = umf_coyote,
                      chains = 3,
-                     iter = 500)
+                     iter = 500,
+                     cores = 3)
 
 coyote_nmix_stan
 plot_effects(coyote_nmix_stan, submodel = "state")
@@ -160,6 +168,54 @@ plot_effects(coyote_nmix_stan, submodel = "det")
 
 traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
 plot_residuals(coyote_nmix_stan, submodel = "state")
+
+plot_posteriors(coyote_nmix_stan)
+```
+```{r}
+m <- coyote_nmix_stan
+post <- as.data.frame(rstan::extract(m@stanfit))
+
+abun <- post %>% 
+  dplyr::select(starts_with("beta_state.")) %>%
+  pivot_longer(everything(),
+               names_to="parameter",
+               values_to="value") %>%
+  mutate(type = "Abundance (log-scale)")
+
+det <- post %>% 
+  dplyr::select(starts_with("beta_det.")) %>%
+  pivot_longer(everything(),
+               names_to="parameter",
+               values_to="value") %>%
+  mutate(type = "Detection (logit-scale)")
+
+effects <- bind_rows(abun, det)
+
+effects_summary <- effects %>%
+  group_by(type, parameter) %>%
+  summarise(
+    mean = mean(value),
+    LCI = quantile(value, 0.025),
+    UCI = quantile(value, 0.975),
+    .groups="drop"
+  )
+
+param_names <- names(coef(m))
+
+effects_summary$names <- param_names
+
+ggplot(effects_summary,
+       aes(x = mean, y = names, color = type)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = LCI, xmax = UCI), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Parameter Estimate", y = "") +
+  theme_bw() +
+  theme(
+    legend.position = "top",
+    text = element_text(size = 14)
+  )
+
 ```
 
 ```{r}
@@ -219,6 +275,188 @@ coyote_pc1 <- ggplot(df_pc1_coyote, aes(x = cov)) +
 
 coyote_pc1
 ```
+
+
+#Custom N-mixture in Stan
+
+```{stan}
+// file: nmix_site_cam_orientation.stan
+data {
+  int<lower=1> S;                 // number of sites
+  int<lower=1> C;                 // number of cameras (S * cams_per_site)
+  int<lower=1> J;                 // number of sampling occasions (weeks)
+  int<lower=1> K;                 // number of site-level abundance covariates (e.g., 4)
+  matrix[S, K] X;                 // site covariate matrix (row = site)
+  int<lower=1,upper=S> site_of_cam[C]; // map camera -> site (length C)
+  int<lower=0> y[C, J];           // observed counts per camera x occasion
+  int<lower=0,upper=1> baited[C, J]; // baited covariate per camera x occasion (0/1)
+  int<lower=1> N_orient;          // number of orientation levels (e.g., 4)
+  int<lower=1,upper=N_orient> orient[C]; // camera orientation level per camera (1..4)
+  int<lower=0> Nmax_site[S];     // per-site Nmax to sum over (>= max observed at site)
+}
+parameters {
+  // abundance (site-level)
+  real alpha0;                    // intercept for log(lambda)
+  vector[K] beta;                 // coefficients for site covariates
+  vector[S] eta_site;             // site random intercepts (unscaled)
+  real<lower=0> sigma_site;       // SD for site random effects
+
+  // detection (camera x occasion)
+  real gamma0;                    // detection intercept (logit scale)
+  real gamma_bait;                // baited effect
+  vector[N_orient] eta_orient;    // orientation random intercepts (unscaled)
+  real<lower=0> sigma_orient;     // SD for orientation random effects
+}
+transformed parameters {
+  vector[S] log_lambda;
+  // site-level linear predictor for abundance
+  log_lambda = alpha0 + X * beta + eta_site * sigma_site;
+  // Note: eta_site is standard normal; we multiply by sigma_site either here or in model.
+}
+model {
+  // Priors
+  alpha0 ~ normal(0, 5);
+  beta ~ normal(0, 2);
+  eta_site ~ normal(0, 1);
+  sigma_site ~ normal(0, 2); // half-normal
+
+  gamma0 ~ normal(0, 5);
+  gamma_bait ~ normal(0, 2);
+  eta_orient ~ normal(0, 1);
+  sigma_orient ~ normal(0, 2);
+
+  // Likelihood: marginalize over latent N for each site
+  for (s in 1:S) {
+    // collect cameras that belong to site s
+    // We'll compute log-likelihood contribution for site s by summing over N = max_obs..Nmax_site[s]
+    int cams_for_s_count = 0;
+    // create temporary arrays for p_ij and y_ij for the cameras in site s
+    // To avoid dynamic arrays in Stan, we'll iterate over cameras and multiply inside loop.
+    // For numerical stability, we'll compute the log marginal likelihood using log_sum_exp.
+
+    // Determine minimal N to sum from: the largest count observed at any camera×occ in site s
+    int ymax = 0;
+    for (c in 1:C) if (site_of_cam[c] == s) {
+      for (j in 1:J)
+        if (y[c,j] > ymax) ymax = y[c,j];
+    }
+
+    real logpN[Nmax_site[s] - ymax + 1]; // log-probabilities for each candidate N
+    int idx = 1;
+    for (N = ymax; N <= Nmax_site[s]; N++) {
+      // log P(N | lambda_s)
+      real log_pN = poisson_lpmf(N | exp(log_lambda[s]));
+
+      // add log P(y | N, p) for all cameras in site s and all occasions
+      real log_py_given_N = 0;
+      for (c in 1:C) if (site_of_cam[c] == s) {
+        for (j in 1:J) {
+          // build p for this camera and occasion:
+          real logit_p = gamma0 + gamma_bait * baited[c,j] + eta_orient[orient[c]] * sigma_orient;
+          real p = inv_logit(logit_p);
+          // binomial_lpmf handles y up to N
+          log_py_given_N += binomial_lpmf(y[c,j] | N, p);
+        }
+      }
+      logpN[idx] = log_pN + log_py_given_N;
+      idx += 1;
+    }
+    target += log_sum_exp(logpN); // add site marginal log-likelihood
+  }
+}
+generated quantities {
+  // posterior predictive draws or derived quantities can be added here
+  // Example: mean abundance per site
+  vector[S] lambda = exp(log_lambda);
+}
+
+```
+
+```{r}
+library(dplyr)
+library(cmdstanr)   # recommended; faster than rstan
+# or library(rstan) if you prefer
+
+# --- assume you have a dataframe 'covars' with one row per camera:
+# columns: location (camera name), location_id (site prefix), cam_orientation (NE/NW/SE/SW),
+# PC1_site, PC2_site, hf_site, veg_site, baited (can be per camera or per camera×occasion)
+# and a counts array or data.frame 'coyotecounts' with dimensions cameras x occasions
+
+# Example: flatten/prepare
+covars <- covars %>%
+  mutate(
+    # camera index
+    cam_idx = row_number(),
+    # orientation index 1..4
+    orient_idx = match(cam_orientation, c("NE","NW","SE","SW"))
+  )
+
+# counts: suppose 'coyotecounts' is a matrix with rows in same order as covars rows
+y_mat <- as.matrix(coyotecounts)  # dim = C x J
+
+C <- nrow(y_mat)
+J <- ncol(y_mat)
+
+# site mapping: extract unique sites (site prefix) and map cameras to site index
+site_names <- unique(covars$location_id)
+S <- length(site_names)
+site_of_cam <- match(covars$location_id, site_names)  # length C, values 1..S
+
+# build site-level covariate matrix X (S x K)
+# ensure covariates are site-level (one row per site)
+site_covs <- covars %>% 
+  group_by(location_id) %>% 
+  summarise(
+    PC1 = first(PC1_site),
+    PC2 = first(PC2_site),
+    hf  = first(hf_site),
+    veg = first(veg_site)
+  ) %>% ungroup()
+X <- as.matrix(site_covs %>% select(PC1, PC2, hf, veg))
+
+K <- ncol(X)
+
+# baited should be camera x occasion matrix (0/1)
+# if you have a single baited flag per camera:
+baited_mat <- matrix(as.integer(covars$baited), nrow = C, ncol = J, byrow = FALSE)
+# or if baiting changes by occasion, build accordingly.
+
+# orientation vector per camera (1..4)
+orient <- covars$orient_idx
+
+# Nmax per site: choose max observed + buffer
+Nmax_site <- integer(S)
+for (s in 1:S) {
+  cams <- which(site_of_cam == s)
+  Nmax_site[s] <- max(y_mat[cams, ]) + 60  # buffer of 60; adjust as needed
+}
+
+# Prepare data list for Stan
+stan_data <- list(
+  S = S,
+  C = C,
+  J = J,
+  K = K,
+  X = X,
+  site_of_cam = site_of_cam,
+  y = y_mat,
+  baited = baited_mat,
+  N_orient = 4,
+  orient = orient,
+  Nmax_site = Nmax_site
+)
+
+# Compile & run with cmdstanr
+mod <- cmdstan_model("nmix_site_cam_orientation.stan")
+fit <- mod$sample(data = stan_data,
+                  chains = 4, parallel_chains = 4,
+                  iter_sampling = 1000, iter_warmup = 1000,
+                  max_treedepth = 12, adapt_delta = 0.95)
+
+print(fit$summary())
+
+```
+
 
 #Multi N-mixture
 ````{r}
