@@ -168,7 +168,7 @@ ggplot(detections_summary, aes(x = NR, y = count, fill = species_common_name)) +
        fill = "Species") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-boreal_main_reports <- study_main_reports %>%
+study_main_reports <- study_main_reports %>%
   filter(NR == "Boreal")
 ```
 
@@ -356,32 +356,12 @@ coyoteabundancehistory <-detectionHistory(recordTable = study_main_reports,
                                          )
 
 coyotecounts <-coyoteabundancehistory$detection_history
-write.csv(coyotecounts, file = "data/coyotecounts.csv", row.names = FALSE)
 
-##Coyote boreal
-coyoteabundancehistory_boreal <-detectionHistory(recordTable = boreal_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         output = "count",
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Coyote",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-
-coyotecounts_boreal <-coyoteabundancehistory_boreal$detection_history
-write.csv(coyotecounts, file = "data/coyotecounts_boreal.csv", row.names = FALSE)
 
 ##Lynx
 lynxabundancehistory <- detectionHistory(recordTable = study_main_reports,
                                          camOp = camera_operation_matrix,
+                                         output = "count",
                                          stationCol = "location",
                                          speciesCol = "species_common_name",
                                          recordDateTimeCol = "image_date_time",
@@ -399,8 +379,9 @@ lynxcounts <-lynxabundancehistory$detection_history
 
 
 ##Marten
-martendetectionhistory<-detectionHistory(recordTable = study_main_reports,
+martenabundancehistory<-detectionHistory(recordTable = study_main_reports,
                                          camOp = camera_operation_matrix,
+                                         output = "count",
                                          stationCol = "location",
                                          speciesCol = "species_common_name",
                                          recordDateTimeCol = "image_date_time",
@@ -414,12 +395,13 @@ martendetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          timeZone = "America/Edmonton",
                                          unmarkedMultFrameInput = TRUE
                                          )
-martendetections<-martendetectionhistory$detection_history
+martencounts<-martenabundancehistory$detection_history
 
 
 ##Fisher
-fisherdetectionhistory<-detectionHistory(recordTable = study_main_reports,
+fisherabundancehistory<-detectionHistory(recordTable = study_main_reports,
                                          camOp = camera_operation_matrix,
+                                         output = "count",
                                          stationCol = "location",
                                          speciesCol = "species_common_name",
                                          recordDateTimeCol = "image_date_time",
@@ -433,7 +415,7 @@ fisherdetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          timeZone = "America/Edmonton",
                                          unmarkedMultFrameInput = TRUE
                                          )
-fisherdetections<-fisherdetectionhistory$detection_history
+fishercounts<-fisherabundancehistory$detection_history
 ```
 
 ##Align covariates location names with detection matrix locations (same number and order)
@@ -456,16 +438,22 @@ common_sites <- intersect(sites_det, sites_cov)
 
 # filter detections
 coyotedetections <- coyotedetections[common_sites, ]
-coyotecounts_boreal <- coyotecounts_boreal[common_sites,]
 coyotecounts <- coyotecounts[common_sites, ]
 lynxdetections <- lynxdetections[common_sites, ]
+lynxcounts <- lynxcounts[common_sites, ]
 martendetections <- martendetections[common_sites, ]
+martencounts <- martencounts[common_sites, ]
 fisherdetections <- fisherdetections[common_sites, ]
+fishercounts <- fishercounts[common_sites, ]
 
 coyotedetections <- coyotedetections[rownames(coyotedetections) != "1095-SE",]
+coyotecounts <- coyotecounts[rownames(coyotecounts) != "1095-SE",]
 lynxdetections <- lynxdetections[rownames(lynxdetections) != "1095-SE",]
+lynxcounts <- lynxcounts[rownames(lynxcounts) != "1095-SE",]
 martendetections <- martendetections[rownames(martendetections) != "1095-SE",]
+martencounts <- martencounts[rownames(martencounts) != "1095-SE",]
 fisherdetections <- fisherdetections[rownames(fisherdetections) != "1095-SE",]
+fishercounts <- fishercounts[rownames(fishercounts) != "1095-SE",]
 
 # filter covariates
 covariates_aligned <- covariates_aligned %>%
@@ -610,6 +598,22 @@ climate_sites <- climate_sites %>%
 
 covars <- climate_sites %>%
   mutate(hf = covar_locations_hf$...4)
+
+#Create columns for site id and camera orientation
+covars <- covars %>% 
+  separate(
+    col = location,
+    into = c("site", "cam_orientation"),
+    sep = "-",     # split at the hyphen
+    remove = FALSE # keep original column if helpful
+  )
+
+#Create column for baited and non baited
+covars <- covars %>%
+  mutate(
+    baited = cam_orientation %in% c("NE", "SE")
+  )
+
 ```
 
 #PC1 variation across province
@@ -717,6 +721,8 @@ covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 
 climate_sites <- climate_sites %>%
   filter(location != ("1095-SE"))
+
+
 ```
 
 ##Rail
@@ -732,11 +738,16 @@ climate_sites <- climate_sites %>%
 
 ```{r}
 write.csv(covariates_unique, file = "data/ehscovars.csv", row.names = FALSE)
-write.csv(climate_sites, file = "data/climatecovars.csv", row.names = FALSE)
-write.csv(covar_locations_hf, file = "data/hfcovars.csv", row.names = FALSE)
+write.csv(covars, file = "data/covars.csv", row.names = FALSE)
 
 write.csv(coyotedetections, file = "data/coyotedetections.csv", row.names = FALSE)
 write.csv(lynxdetections, file = "data/lynxdetections.csv", row.names = FALSE)
 write.csv(martendetections, file = "data/martendetections.csv", row.names = FALSE)
 write.csv(fisherdetections, file = "data/fisherdetections.csv", row.names = FALSE)
+
+write.csv(coyotecounts, file = "data/coyotecounts.csv", row.names = FALSE)
+write.csv(lynxcounts, file = "data/lynxcounts.csv", row.names = FALSE)
+write.csv(martencounts, file = "data/martencounts.csv", row.names = FALSE)
+write.csv(fishercounts, file = "data/fishercounts.csv", row.names = FALSE)
+
 ```

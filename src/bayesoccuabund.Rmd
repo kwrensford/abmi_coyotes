@@ -32,7 +32,8 @@ library(mgcv)
 library(cowplot)
 library(gridExtra)
 library(ubms)
-library(multiNmix)
+library(spAbundance)
+library(spOccupancy)
 ```
 
 ```{r}
@@ -42,32 +43,25 @@ getwd()
 #Formatting count data
 
 ```{r}
-getwd()
-coyote <- as.matrix(read.csv("data/coyotedetections.csv"))
-coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
-coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts.csv"))
 
-dimcoyote[is.na(coyote)] <- 0 
+coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
+lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
+martencounts <- as.matrix(read.csv("data/martencounts.csv"))
+fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
 ```
 
 #Load in covariate data
 
 ```{r}
-climate <- read.csv("data/climatecovars.csv")
-hf <- read.csv("data/hfcovars.csv")
+covars <- read.csv("data/covars.csv")
 ```
 
 ```{r}
-covars <- bind_cols(climate, hf[,4])
-
-covars<-rename(covars, hf = ...6)
 
 covars$PC1<-scale(covars$PC1)
 covars$PC2<-scale(covars$PC2)
 covars$hf<-scale(covars$hf)
-
-covars_boreal <- covars[covars$location %in% rownames(coyotecounts_boreal), ]
-
+covars$baited <- as.numeric(covars$baited)
 ```
 
 ##Frequentist N-mixture in unmarked
@@ -78,39 +72,83 @@ umf_coyote <- unmarkedFramePCount(
 )
 
 coyote_nmix <- pcount(
-formula = ~ 1 ~ 
+formula = ~ baited ~ 
   PC1 * hf + PC2 * hf,
 data = umf_coyote,
 mixture = "P"
 )
 
 coyote_nmix
-plotEffects(coyote_nmix, type = "state", covariate = "PC1")
-plotEffects(coyote_nmix, type = "state", covariate = "PC2")
-plotEffects(coyote_nmix, type = "state", covariate = "hf")
+plotEffects(coyote_nmix, "state", "PC1")
+plotEffects(coyote_nmix, "state", "PC2")
+plotEffects(coyote_nmix, "state", "hf")
+plotEffects(coyote_nmix, "det", "baited")
 ```
+
+
+
+
+#Lynx nmix abundance in unmarked
 ```{r}
-umf_coyote_boreal <- unmarkedFramePCount(
-  y = coyotecounts_boreal,
+umf_lynx <- unmarkedFramePCount(
+  y = lynxcounts,
   siteCovs = covars
 )
 
-coyote_nmix_boreal <- pcount(
-formula = ~ 1 ~ 
+lynx_nmix <- pcount(
+formula = ~ baited ~ 
   PC1 * hf + PC2 * hf,
-data = umf_coyote_boreal,
+data = umf_lynx,
 mixture = "P"
 )
 
-coyote_nmix_boreal
-plotEffects(coyote_nmix_boreal, type = "state", covariate = "PC1")
-plotEffects(coyote_nmix_boreal, type = "state", covariate = "PC2")
-plotEffects(coyote_nmix_boreal, type = "state", covariate = "hf")
+lynx_nmix
+plotEffects(lynx_nmix, type = "state", covariate = "PC1")
+plotEffects(lynx_nmix, type = "state", covariate = "PC2")
+plotEffects(lynx_nmix, type = "state", covariate = "hf")
+```
+#Marten nmix abundance in unmarked
+```{r}
+umf_marten <- unmarkedFramePCount(
+  y = martencounts,
+  siteCovs = covars
+)
+
+marten_nmix <- pcount(
+formula = ~ 1 ~ 
+  PC1 * hf + PC2 * hf,
+data = umf_marten,
+mixture = "P"
+)
+
+marten_nmix
+plotEffects(marten_nmix, type = "state", covariate = "PC1")
+plotEffects(marten_nmix, type = "state", covariate = "PC2")
+plotEffects(marten_nmix, type = "state", covariate = "hf")
+```
+#Fisher nmix abundance in unmarked
+```{r}
+umf_fisher <- unmarkedFramePCount(
+  y = fishercounts,
+  siteCovs = covars
+)
+
+fisher_nmix <- pcount(
+formula = ~ baited ~ 
+  PC1 * hf + PC2 * hf,
+data = umf_fisher,
+mixture = "P"
+)
+
+fisher_nmix
+plotEffects(fisher_nmix, type = "state", covariate = "PC1")
+plotEffects(fisher_nmix, type = "state", covariate = "PC2")
+plotEffects(fisher_nmix, type = "state", covariate = "hf")
 ```
 
 #Stan N-mixture using ubms
 ```{r}
-coyote_nmix_stan <- stan_pcount(formula =  ~ 1 ~ 
+coyote_nmix_stan <- stan_pcount(formula =  ~ baited + (1 | cam_orientation) ~ 
                        PC1 * hf + PC2 * hf,
                      data = umf_coyote,
                      chains = 3,
@@ -118,4 +156,72 @@ coyote_nmix_stan <- stan_pcount(formula =  ~ 1 ~
 
 coyote_nmix_stan
 plot_effects(coyote_nmix_stan, submodel = "state")
+plot_effects(coyote_nmix_stan, submodel = "det")
+
+traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
+plot_residuals(coyote_nmix_stan, submodel = "state")
+```
+
+```{r}
+pc1data_lohf <- data.frame(
+  PC1 = seq(min(covars$PC1, na.rm = TRUE),
+           max(covars$PC1, na.rm = TRUE),
+           length.out = 1000),
+  PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.25, na.rm = TRUE)
+)
+
+pc1data_hihf <- data.frame(
+  PC1 = seq(min(covars$PC1, na.rm = TRUE),
+           max(covars$PC1, na.rm = TRUE),
+           length.out = 1000),
+  PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
+  hf = quantile(covars$hf, 0.75, na.rm = TRUE)
+)
+
+pred_coyote_pc1_lohf <- ubms::predict(
+  coyote_nmix_stan,
+  submodel = "state",
+  species = "coyote",
+  newdata = pc1data_lohf
+)
+
+pred_coyote_pc1_hihf <- ubms::predict(
+  coyote_nmix_stan,
+  submodel = "state",
+  species = "coyote",
+  newdata = pc1data_hihf
+)
+
+df_pc1_coyote <- data.frame(
+  cov = pc1data_lohf$PC1,
+  pred_lo = pred_coyote_pc1_lohf$Predicted,
+  lower_lo = pred_coyote_pc1_lohf$`2.5%`,
+  upper_lo = pred_coyote_pc1_lohf$`97.5%`,
+  pred_hi = pred_coyote_pc1_hihf$Predicted,
+  lower_hi = pred_coyote_pc1_hihf$`2.5%`,
+  upper_hi = pred_coyote_pc1_hihf$`97.5%`
+)
+
+hf_labels <-  c(pred_lo = "darkgreen", pred_hi = "darkorange3")
+
+coyote_pc1 <- ggplot(df_pc1_coyote, aes(x = cov)) +
+  geom_ribbon(aes(ymin = lower_lo, ymax = upper_lo), fill = "darkgreen", alpha = 0.2) +
+  geom_line(aes(y = pred_lo), color = "darkgreen", linewidth = 1) +
+  geom_ribbon(aes(ymin = lower_hi, ymax = upper_hi), fill = "darkorange3", alpha = 0.2) +
+  geom_line(aes(y = pred_hi), color = "darkorange3", linewidth= 1) +
+  scale_color_manual(values = hf_labels) +
+  labs(y = "Coyote occupancy probability",
+       x = "Climate PC1",
+       title = "Coyote abundance",
+       colors = "Human footprint")+
+  theme_classic()
+
+coyote_pc1
+```
+
+#Multi N-mixture
+````{r}
+abund.ms.formula <- ~ PC1 * hf + PC2 * hf
+det.ms.formula <- ~ baited
 ```
