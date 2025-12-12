@@ -584,7 +584,7 @@ sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
 sites_vect <- vect(sites_hf)
 
 plot(hf_alberta_masked)
-points(sites_vect, col = "orange")
+points(sites_vect, col = "darkorange")
 
 buffers <- st_buffer(sites_hf, dist = 5000)
 buffers_vect <- vect(buffers)
@@ -685,55 +685,149 @@ plot(coyote_covars$PC2, coyote_covars$coyote_counts)
 plot(coyote_covars$hf, coyote_covars$coyote_counts)
 ```
 
+```{r}
+library(ggplot2)
+
+# assuming your long dataframe is called `long_df` 
+site_counts_wide <- site_counts %>%
+  pivot_wider(
+    names_from = species,  # column with species names
+    values_from = detections    # column with counts
+  )
+
+site_counts_wide <- site_counts_wide %>%
+  dplyr::select(!site)
+
+explore_df <- cbind(covars, site_counts_wide)
+
+species_list <- c("coyote", "lynx", "marten", "fisher")
+
+cov_to_plot <- "built"
+
+plots <- lapply(species_list, function(sp) {
+  ggplot(explore_df, aes_string(x = cov_to_plot, y = sp)) +
+    geom_point(alpha = 0.4) +
+    geom_smooth(method = "loess") +
+    labs(title = paste("Detections of", sp, "vs", cov_to_plot),
+         x = cov_to_plot,
+         y = "Detection count per site") +
+    theme_bw()
+})
+
+plots
+```
+
 #Disentangle hf variables
 
 ##Roads
 ```{r}
 # Load raster (human footprint TIFF) and crop to alberta provincial boundary
-hf_raster <- rast("data/chfi/cum_threat2020.02.18.tif")
+roads_raster <- rast("data/chfi/roads.tif")
 
-url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
+alberta_proj_roads <- project(alberta, roads_raster)
 
-canada <- gadm("Canada", level = 1, path = "data/")
-alberta <- canada[canada$NAME_1 == "Alberta", ]
-alberta_proj <- project(alberta, hf_raster)
-
-hf_alberta <- crop(hf_raster, alberta_proj)
-hf_alberta_masked <- mask(hf_alberta, alberta_proj)
+roads_alberta <- crop(roads_raster, alberta_proj_roads)
+roads_alberta_masked <- mask(roads_alberta, alberta_proj)
 
 # Convert sites to spatial object
 covar_locations <- covar_locations %>%
   filter(!is.na(Longitude) & !is.na(Latitude))
 
-sites_hf <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
-sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
-sites_vect <- vect(sites_hf)
+sites_roads <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
+sites_roads <- st_transform(sites_roads, crs(roads_alberta_masked))
+roads_vect <- vect(sites_roads)
 
-plot(hf_alberta_masked)
-points(sites_vect, col = "")
+plot(roads_alberta_masked)
+points(roads_vect, col = "darkorange")
 
-buffers <- st_buffer(sites_hf, dist = 5000)
-buffers_vect <- vect(buffers)
+roads_vals <- terra::extract(roads_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
 
-hf_vals <- terra::extract(hf_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
-
-covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
-
-climate_sites <- climate_sites %>%
-  filter(location != ("1095-SE"))
-
+covars <- covars %>%
+  mutate(roads = roads_vals$roads)
 
 ```
 
 ##Rail
+```{r}
+# Load raster (human footprint TIFF) and crop to alberta provincial boundary
+rail_raster <- rast("data/chfi/roads.tif")
 
-##Forestry
+alberta_proj_rail <- project(alberta, roads_raster)
+
+roads_alberta <- crop(roads_raster, alberta_proj_roads)
+roads_alberta_masked <- mask(roads_alberta, alberta_proj)
+
+# Convert sites to spatial object
+covar_locations <- covar_locations %>%
+  filter(!is.na(Longitude) & !is.na(Latitude))
+
+sites_roads <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
+sites_roads <- st_transform(sites_roads, crs(roads_alberta_masked))
+roads_vect <- vect(sites_roads)
+
+plot(roads_alberta_masked)
+points(roads_vect, col = "darkorange")
+
+roads_vals <- terra::extract(roads_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
+
+covar_locations_hf <- bind_cols(covar_locations_hf, roads_vals[,-1])
+
+```
+
+##Built
+```{r}
+# Load raster (human footprint TIFF) and crop to alberta provincial boundary
+built_raster <- rast("data/chfi/built.tif")
+
+alberta_proj_built <- project(alberta, built_raster)
+
+built_alberta <- crop(built_raster, alberta_proj_built)
+built_alberta_masked <- mask(built_alberta, alberta_proj)
+
+# Convert sites to spatial object
+sites_built <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
+sites_built <- st_transform(sites_built, crs(built_alberta_masked))
+built_vect <- vect(sites_built)
+
+plot(built_alberta_masked)
+points(built_vect, col = "darkorange")
+
+built_vals <- terra::extract(built_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
+
+covar_locations_hf <- bind_cols(covar_locations_hf, roads_vals[,-1])
+
+```
 
 #Cropland
 
 #Pasture
 
+#Energy
+```{r}
+# Load raster (human footprint TIFF) and crop to alberta provincial boundary
+roads_raster <- rast("data/chfi/roads.tif")
 
+alberta_proj_roads <- project(alberta, roads_raster)
+
+roads_alberta <- crop(roads_raster, alberta_proj_roads)
+roads_alberta_masked <- mask(roads_alberta, alberta_proj)
+
+# Convert sites to spatial object
+covar_locations <- covar_locations %>%
+  filter(!is.na(Longitude) & !is.na(Latitude))
+
+sites_roads <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
+sites_roads <- st_transform(sites_roads, crs(roads_alberta_masked))
+roads_vect <- vect(sites_roads)
+
+plot(roads_alberta_masked)
+points(roads_vect, col = "darkorange")
+
+roads_vals <- terra::extract(roads_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
+
+covar_locations_hf <- bind_cols(covar_locations_hf, roads_vals[,-1])
+
+```
 #Write CSV files
 
 ```{r}

@@ -14,6 +14,7 @@ knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
 library(vroom)
 library(dplyr)
 library(tidyr)
+library(purrr)
 library(ggplot2)
 library(forcats)
 library(lubridate)
@@ -52,6 +53,119 @@ martencounts <- as.matrix(read.csv("data/martencounts.csv"))
 fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
 ```
 
+#Visualizing overlap
+```{r}
+count_list <- list(
+  coyote = coyotecounts,
+  lynx   = lynxcounts,
+  marten = martencounts,
+  fisher = fishercounts
+)
+
+site_id <- covars$location
+
+sites_species <- c(
+  coyote = sum(rowSums(coyotecounts, na.rm = TRUE) > 0),
+  lynx   = sum(rowSums(lynxcounts, na.rm = TRUE) > 0),
+  marten = sum(rowSums(martencounts, na.rm = TRUE) > 0),
+  fisher = sum(rowSums(fishercounts, na.rm = TRUE) > 0)
+)
+
+site_counts <- map_df(names(count_list), function(sp) {
+  mat <- count_list[[sp]]
+  data.frame(
+    site = site_id,
+    species = sp,
+    detections = rowSums(mat, na.rm = TRUE)
+  )
+})
+
+ggplot(site_counts, aes(x = site, y = detections)) +
+  geom_col() +
+  facet_wrap(~ species, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Detections per Site for Each Species",
+    x = "Site ID",
+    y = "Total Detections"
+  )
+```
+```{r}
+presence_list <- lapply(count_list, function(mat) {
+  as.numeric(rowSums(mat, na.rm = TRUE) > 0)
+})
+
+presence_df <- data.frame(
+  site = site_id,
+  coyote = presence_list$coyote,
+  lynx   = presence_list$lynx,
+  marten   = presence_list$marten,
+  fisher = presence_list$fisher
+)
+
+# get species names
+sp <- names(count_list)
+
+# function to count sites where sp occurs alone
+alone_counts <- sapply(sp, function(s) {
+  this_present  <- presence_df[[s]] == 1
+  others_absent <- rowSums(presence_df[sp[sp != s]]) == 0
+  sum(this_present & others_absent)
+})
+
+alone_counts
+
+pairwise_counts <- function(matA, matB, spA, spB) {
+
+  A_present <- rowSums(matA, na.rm =TRUE) > 0
+  B_present <- rowSums(matB, na.rm =TRUE) > 0
+
+  data.frame(
+    sp1 = spA,
+    sp2 = spB,
+    both_present = sum(A_present & B_present),
+    only_sp1     = sum(A_present & !B_present),
+    only_sp2     = sum(!A_present & B_present)
+  )
+}
+
+out1 <- pairwise_counts(coyotecounts, lynxcounts,   "coyote", "lynx")
+out2 <- pairwise_counts(coyotecounts, martencounts, "coyote", "marten")
+out3 <- pairwise_counts(coyotecounts, fishercounts, "coyote", "fisher")
+out4 <- pairwise_counts(lynxcounts,   martencounts, "lynx",   "marten")
+out5 <- pairwise_counts(lynxcounts,   fishercounts, "lynx",   "fisher")
+out6 <- pairwise_counts(martencounts, fishercounts, "marten", "fisher")
+
+pairwise_summary <- rbind(out1, out2, out3, out4, out5, out6)
+pairwise_summary
+
+```
+
+```{r}
+species <- names(count_list)
+
+pairs <- t(combn(species, 2))
+colnames(pairs) <- c("sp1", "sp2")
+
+overlap_results <- apply(pairs, 1, function(sp) {
+  sum(presence_df[[sp[1]]] == 1 & presence_df[[sp[2]]] == 1)
+})
+
+overlap_df <- data.frame(
+  sp1 = pairs[,1],
+  sp2 = pairs[,2],
+  overlap_sites = overlap_results
+)
+
+ggplot(overlap_df, aes(sp1, sp2, fill = overlap_sites)) +
+  geom_tile() +
+  geom_text(aes(label = overlap_sites)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Site Overlap Between Species")
+
+```
+
 #Load in covariate data
 
 ```{r}
@@ -87,9 +201,6 @@ plotEffects(coyote_nmix, "state", "hf")
 plotEffects(coyote_nmix, "det", "baited")
 ```
 
-
-
-
 #Lynx nmix abundance in unmarked
 ```{r}
 umf_lynx <- unmarkedFramePCount(
@@ -108,6 +219,8 @@ lynx_nmix
 plotEffects(lynx_nmix, type = "state", covariate = "PC1")
 plotEffects(lynx_nmix, type = "state", covariate = "PC2")
 plotEffects(lynx_nmix, type = "state", covariate = "hf")
+plotEffects(lynx_nmix, "det", "baited")
+
 ```
 #Marten nmix abundance in unmarked
 ```{r}
@@ -127,6 +240,7 @@ marten_nmix
 plotEffects(marten_nmix, type = "state", covariate = "PC1")
 plotEffects(marten_nmix, type = "state", covariate = "PC2")
 plotEffects(marten_nmix, type = "state", covariate = "hf")
+plotEffects(marten_nmix, "det", "baited")
 ```
 #Fisher nmix abundance in unmarked
 ```{r}
@@ -146,6 +260,7 @@ fisher_nmix
 plotEffects(fisher_nmix, type = "state", covariate = "PC1")
 plotEffects(fisher_nmix, type = "state", covariate = "PC2")
 plotEffects(fisher_nmix, type = "state", covariate = "hf")
+plotEffects(fisher_nmix, "det", "baited")
 ```
 
 #Stan N-mixture using ubms
