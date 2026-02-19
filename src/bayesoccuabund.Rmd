@@ -37,6 +37,7 @@ library(spAbundance)
 library(spOccupancy)
 library(MCMCvis)
 library(forestplot)
+library(purrr)
 ```
 
 ```{r}
@@ -51,6 +52,7 @@ coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
 lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
 martencounts <- as.matrix(read.csv("data/martencounts.csv"))
 fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
+redfoxcounts <- as.matrix(read.csv("data/redfoxcounts.csv"))
 ```
 
 #Visualizing overlap
@@ -59,7 +61,8 @@ count_list <- list(
   coyote = coyotecounts,
   lynx   = lynxcounts,
   marten = martencounts,
-  fisher = fishercounts
+  fisher = fishercounts,
+  redfox = redfoxcounts
 )
 
 site_id <- covars$location
@@ -68,7 +71,8 @@ sites_species <- c(
   coyote = sum(rowSums(coyotecounts, na.rm = TRUE) > 0),
   lynx   = sum(rowSums(lynxcounts, na.rm = TRUE) > 0),
   marten = sum(rowSums(martencounts, na.rm = TRUE) > 0),
-  fisher = sum(rowSums(fishercounts, na.rm = TRUE) > 0)
+  fisher = sum(rowSums(fishercounts, na.rm = TRUE) > 0),
+  redfox = sum(rowSums(fishercounts, na.rm = TRUE) > 0)
 )
 
 site_counts <- map_df(names(count_list), function(sp) {
@@ -100,7 +104,8 @@ presence_df <- data.frame(
   coyote = presence_list$coyote,
   lynx   = presence_list$lynx,
   marten   = presence_list$marten,
-  fisher = presence_list$fisher
+  fisher = presence_list$fisher,
+  redfox = presence_list$redfox
 )
 
 # get species names
@@ -132,11 +137,15 @@ pairwise_counts <- function(matA, matB, spA, spB) {
 out1 <- pairwise_counts(coyotecounts, lynxcounts,   "coyote", "lynx")
 out2 <- pairwise_counts(coyotecounts, martencounts, "coyote", "marten")
 out3 <- pairwise_counts(coyotecounts, fishercounts, "coyote", "fisher")
-out4 <- pairwise_counts(lynxcounts,   martencounts, "lynx",   "marten")
-out5 <- pairwise_counts(lynxcounts,   fishercounts, "lynx",   "fisher")
-out6 <- pairwise_counts(martencounts, fishercounts, "marten", "fisher")
+out4 <- pairwise_counts(coyotecounts, redfoxcounts, "coyote", "redfox")
+out5 <- pairwise_counts(lynxcounts,   martencounts, "lynx",   "marten")
+out6 <- pairwise_counts(lynxcounts,   fishercounts, "lynx",   "fisher")
+out7 <- pairwise_counts(lynxcounts,   fishercounts, "lynx",   "redfox")
+out8 <- pairwise_counts(martencounts, fishercounts, "marten", "fisher")
+out9 <- pairwise_counts(martencounts, fishercounts, "marten", "redfox")
+out10 <- pairwise_counts(martencounts, fishercounts, "fisher", "redfox")
 
-pairwise_summary <- rbind(out1, out2, out3, out4, out5, out6)
+pairwise_summary <- rbind(out1, out2, out3, out4, out5, out6, out7, out8, out9, out10)
 pairwise_summary
 
 ```
@@ -201,6 +210,69 @@ plotEffects(coyote_nmix, "state", "hf")
 plotEffects(coyote_nmix, "det", "baited")
 ```
 
+#Coyote disaggregated human footprint
+```{r}
+#Linear features
+coyote_nmix_linear <- pcount(
+formula = ~ baited ~ 
+  PC1 * linear + PC2 * linear,
+data = umf_coyote,
+mixture = "P"
+)
+
+coyote_nmix_linear
+plotEffects(coyote_nmix_linear, "state", "PC1")
+plotEffects(coyote_nmix_linear, "state", "PC2")
+plotEffects(coyote_nmix_linear, "state", "linear")
+plotEffects(coyote_nmix_linear, "det", "baited")
+```
+```{r}
+#Linear features
+coyote_nmix_linearabmi <- pcount(
+formula = ~ baited ~ 
+  PC1 * abmi_linear + PC2 * abmi_linear,
+data = umf_coyote,
+mixture = "P"
+)
+
+coyote_nmix_linearabmi
+plotEffects(coyote_nmix_linearabmi, "state", "PC1")
+plotEffects(coyote_nmix_linearabmi, "state", "PC2")
+plotEffects(coyote_nmix_linearabmi, "state", "abmi_linear")
+plotEffects(coyote_nmix_linearabmi, "det", "baited")
+```
+
+```{r}
+#Industry
+coyote_nmix_industrial <- pcount(
+formula = ~ baited ~ 
+  PC1 * industrial + PC2 * industrial,
+data = umf_coyote,
+mixture = "P"
+)
+
+coyote_nmix_industrial
+plotEffects(coyote_nmix_industrial, "state", "PC1")
+plotEffects(coyote_nmix_industrial, "state", "PC2")
+plotEffects(coyote_nmix_industrial, "state", "industrial")
+plotEffects(coyote_nmix_industrial, "det", "baited")
+```
+```{r}
+#Industry
+coyote_nmix_agriculture <- pcount(
+formula = ~ baited ~ 
+  PC1 * agriculture + PC2 * agriculture,
+data = umf_coyote,
+mixture = "P"
+)
+
+coyote_nmix_agriculture
+plotEffects(coyote_nmix_agriculture, "state", "PC1")
+plotEffects(coyote_nmix_agriculture, "state", "PC2")
+plotEffects(coyote_nmix_agriculture, "state", "agriculture")
+plotEffects(coyote_nmix_agriculture, "det", "baited")
+```
+
 #Lynx nmix abundance in unmarked
 ```{r}
 umf_lynx <- unmarkedFramePCount(
@@ -263,6 +335,28 @@ plotEffects(fisher_nmix, type = "state", covariate = "hf")
 plotEffects(fisher_nmix, "det", "baited")
 ```
 
+#Red Fox nmix abundance in unmarked
+```{r}
+umf_redfox <- unmarkedFramePCount(
+  y = redfoxcounts,
+  siteCovs = covars
+)
+
+redfox_nmix <- pcount(
+formula = ~ baited ~ 
+  PC1 * hf + PC2 * hf,
+data = umf_redfox,
+mixture = "P"
+)
+
+redfox_nmix
+plotEffects(redfox_nmix, type = "state", covariate = "PC1")
+plotEffects(redfox_nmix, type = "state", covariate = "PC2")
+plotEffects(redfox_nmix, type = "state", covariate = "hf")
+plotEffects(redfox_nmix, "det", "baited")
+
+```
+
 #Stan N-mixture using ubms
 ```{r}
 umf_coyote <- unmarkedFramePCount(
@@ -282,9 +376,13 @@ plot_effects(coyote_nmix_stan, submodel = "state")
 plot_effects(coyote_nmix_stan, submodel = "det")
 
 traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
-plot_residuals(coyote_nmix_stan, submodel = "state")
+plot_residuals(coyote_nmix_stan, submodel = "state", covariate = "hf")
 
 plot_posteriors(coyote_nmix_stan)
+
+coyote_gof<-gof(coyote_nmix_stan, draws=100)
+coyote_gof
+plot(coyote_gof)
 ```
 ```{r}
 m <- coyote_nmix_stan

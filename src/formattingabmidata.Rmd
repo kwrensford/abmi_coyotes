@@ -65,7 +65,8 @@ study_image_reports<-study_image_reports %>%
 ##Filter data for only mesos
 study_main_reports <- study_main_reports %>%
   filter(species_common_name == "Coyote" 
-         | species_common_name == "Canada Lynx" 
+         | species_common_name == "Canada Lynx"
+         | species_common_name == "Red Fox"
          | species_common_name == "Marten"
          | species_common_name == "Fisher")
 
@@ -296,6 +297,24 @@ lynxdetectionhistory<-detectionHistory(recordTable = study_main_reports,
 lynxdetections<-lynxdetectionhistory$detection_history
 
 
+##Red Fox
+redfoxdetectionhistory<-detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Red Fox",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+redfoxdetections<-redfoxdetectionhistory$detection_history
+
 ##Marten
 martendetectionhistory<-detectionHistory(recordTable = study_main_reports,
                                          camOp = camera_operation_matrix,
@@ -377,6 +396,25 @@ lynxabundancehistory <- detectionHistory(recordTable = study_main_reports,
                                          )
 lynxcounts <-lynxabundancehistory$detection_history
 
+##Red Fox
+redfoxabundancehistory <- detectionHistory(recordTable = study_main_reports,
+                                         camOp = camera_operation_matrix,
+                                         output = "count",
+                                         stationCol = "location",
+                                         speciesCol = "species_common_name",
+                                         recordDateTimeCol = "image_date_time",
+                                         recordDateTimeFormat = "ymd_HMS",
+                                         species = "Red Fox",
+                                         occasionLength = 7,
+                                         day1 = "station",
+                                         datesAsOccasionNames = FALSE,
+                                         includeEffort = TRUE,
+                                         scaleEffort = FALSE,
+                                         timeZone = "America/Edmonton",
+                                         unmarkedMultFrameInput = TRUE
+                                         )
+redfoxcounts <-redfoxabundancehistory$detection_history
+
 
 ##Marten
 martenabundancehistory<-detectionHistory(recordTable = study_main_reports,
@@ -445,6 +483,8 @@ martendetections <- martendetections[common_sites, ]
 martencounts <- martencounts[common_sites, ]
 fisherdetections <- fisherdetections[common_sites, ]
 fishercounts <- fishercounts[common_sites, ]
+redfoxdetections <- redfoxdetections[common_sites, ]
+redfoxcounts <- redfoxcounts[common_sites, ]
 
 coyotedetections <- coyotedetections[rownames(coyotedetections) != "1095-SE",]
 coyotecounts <- coyotecounts[rownames(coyotecounts) != "1095-SE",]
@@ -454,6 +494,8 @@ martendetections <- martendetections[rownames(martendetections) != "1095-SE",]
 martencounts <- martencounts[rownames(martencounts) != "1095-SE",]
 fisherdetections <- fisherdetections[rownames(fisherdetections) != "1095-SE",]
 fishercounts <- fishercounts[rownames(fishercounts) != "1095-SE",]
+redfoxdetections <- redfoxdetections[rownames(redfoxdetections) != "1095-SE",]
+redfoxcounts <- redfoxcounts[rownames(redfoxcounts) != "1095-SE",]
 
 # filter covariates
 covariates_aligned <- covariates_aligned %>%
@@ -474,6 +516,7 @@ identical(rownames(coyotedetections), covariates_unique$location)
 identical(rownames(lynxdetections), covariates_unique$location)
 identical(rownames(martendetections), covariates_unique$location)
 identical(rownames(fisherdetections), covariates_unique$location)
+identical(rownames(redfoxdetections), covariates_unique$location)
 ```
 
 ##Dimension reduction of climate data
@@ -556,7 +599,14 @@ ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
 
 ```
 
+##ABMI Linear Features
+```{r}
+linear_abmi <- covariates_unique %>%
+  dplyr::select(location, Latitude, Longitude, TransmissionLine, TransmissionLine_buf, Pipeline_buf, RoadHardSurface_buf, RoadVegetatedVerge_buf, RoadTrailVegetated_buf, SeismicLineNarrow_buf, SeismicLineWide_buf, RailHardSurface_buf, RailVegetatedVerge_buf)
 
+linear_abmi <- linear_abmi %>%
+  mutate(abmi_linear = rowSums(.[4:13]))
+```
 ##Canada Human Footprint index
 
 ```{r}
@@ -565,14 +615,35 @@ library(geodata)
 
 # Load raster (human footprint TIFF) and crop to alberta provincial boundary
 hf_raster <- rast("data/chfi/cum_threat2020.02.18.tif")
+roads_raster <- rast("data/chfi/roads.tif")
+rail_raster <- rast("data/chfi/rail.tif")
+built_raster <- rast("data/chfi/built.tif")
+oil_gas_raster <- rast("data/chfi/oil_gas.tif")
+forestry_raster <- rast("data/chfi/forestry_harvest.tif")
+mines_raster <- rast("data/chfi/mines.tif")
+crop_raster <- rast("data/chfi/crop.tif")
+pasture_raster <- rast("data/chfi/pasture.tif")
+
+roads_raster <- resample(roads_raster, hf_raster)
+rail_raster <- resample(rail_raster, hf_raster)
+built_raster <- resample(built_raster, hf_raster)
+oil_gas_raster <- resample(oil_gas_raster, hf_raster)
+forestry_raster <- resample(forestry_raster, hf_raster)
+mines_raster <- resample(mines_raster, hf_raster)
+crop_raster <- resample(crop_raster, hf_raster)
+pasture_raster <- resample(pasture_raster, hf_raster)
+
+hf_stack <- c(hf_raster, roads_raster, rail_raster, built_raster, oil_gas_raster, forestry_raster, mines_raster, crop_raster, pasture_raster)
+
+names(hf_stack) <- c("hf", "roads", "rail", "built", "oil_gas", "forestry", "mines", "crop", "pasture")
 
 url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
 
 canada <- gadm("Canada", level = 1, path = "data/")
 alberta <- canada[canada$NAME_1 == "Alberta", ]
-alberta_proj <- project(alberta, hf_raster)
+alberta_proj <- project(alberta, hf_stack)
 
-hf_alberta <- crop(hf_raster, alberta_proj)
+hf_alberta <- crop(hf_stack, alberta_proj)
 hf_alberta_masked <- mask(hf_alberta, alberta_proj)
 
 # Convert sites to spatial object
@@ -584,12 +655,36 @@ sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
 sites_vect <- vect(sites_hf)
 
 plot(hf_alberta_masked)
-points(sites_vect, col = "darkorange")
+plot(sites_vect, add = TRUE, col = "darkorange")
 
 buffers <- st_buffer(sites_hf, dist = 5000)
 buffers_vect <- vect(buffers)
 
+#Linear Features
+hf_linear <- hf_alberta_masked$rail + hf_alberta_masked$roads
+names(hf_linear) <- "linear"
+
+plot(hf_linear)
+plot(sites_vect, add = TRUE, col = "darkorange", cex = 0.5)
+
+#Industrial
+hf_industrial <- hf_alberta_masked$oil_gas + hf_alberta_masked$mines + hf_alberta_masked$forestry
+names(hf_industrial) <- "industrial"
+
+plot(hf_industrial)
+plot(sites_vect, add = TRUE, col = "darkorange", cex = 0.5)
+
+#Agriculture
+hf_agriculture <- hf_alberta_masked$crop + hf_alberta_masked$pasture
+names(hf_agriculture) <- "agriculture"
+
+plot(hf_agriculture)
+plot(sites_vect, add = TRUE, col = "darkorange", cex = 0.5)
+
 hf_vals <- terra::extract(hf_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
+linear_vals <- terra::extract(hf_linear, buffers_vect, fun = mean, na.rm = TRUE)
+industrial_vals <- terra::extract(hf_industrial, buffers_vect, fun = mean, na.rm = TRUE)
+agriculture_vals <- terra::extract(hf_agriculture, buffers_vect, fun = mean, na.rm = TRUE)
 
 covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 
@@ -597,7 +692,12 @@ climate_sites <- climate_sites %>%
   filter(location != ("1095-SE"))
 
 covars <- climate_sites %>%
-  mutate(hf = covar_locations_hf$...4)
+  left_join(covar_locations_hf)
+
+covars <- covars %>%
+  bind_cols(linear_vals[-1])%>%
+  bind_cols(industrial_vals[-1])%>%
+  bind_cols((agriculture_vals[-1]))
 
 #Create columns for site id and camera orientation
 covars <- covars %>% 
@@ -611,9 +711,35 @@ covars <- covars %>%
 #Create column for baited and non baited
 covars <- covars %>%
   mutate(
-    baited = cam_orientation %in% c("NE", "SE")
+    baited = cam_orientation %in% c("NE", "SW")
   )
 
+#Add abmi linear feature data
+covars <-covars %>%
+  bind_cols(linear_abmi[14])
+
+#Correlation
+hf_corr_data <- covars %>%
+  dplyr::select(hf, linear, industrial, agriculture)
+
+corr_matrix <- cor(hf_corr_data, use = "complete.obs", method = "pearson")
+print(corr_matrix)
+corrplot::corrplot(corr_matrix, method = "color", type = "upper")
+
+barplot(covars$linear)
+barplot(covars$industrial)
+barplot(covars$agriculture)
+
+long_covars <- covars %>%
+    dplyr::select(location, hf, linear, industrial, agriculture) %>%
+    pivot_longer(cols = -location,
+                 names_to = "covariate",
+                 values_to = "value")
+
+ggplot(long_covars, aes(x = value)) +
+    geom_histogram(bins = 30) +
+    facet_wrap(~ covariate, scales = "free") +
+    theme_bw()
 ```
 
 #PC1 variation across province
@@ -700,7 +826,7 @@ site_counts_wide <- site_counts_wide %>%
 
 explore_df <- cbind(covars, site_counts_wide)
 
-species_list <- c("coyote", "lynx", "marten", "fisher")
+species_list <- c("coyote", "lynx", "marten", "fisher", "redfox")
 
 cov_to_plot <- "built"
 
@@ -717,117 +843,7 @@ plots <- lapply(species_list, function(sp) {
 plots
 ```
 
-#Disentangle hf variables
 
-##Roads
-```{r}
-# Load raster (human footprint TIFF) and crop to alberta provincial boundary
-roads_raster <- rast("data/chfi/roads.tif")
-
-alberta_proj_roads <- project(alberta, roads_raster)
-
-roads_alberta <- crop(roads_raster, alberta_proj_roads)
-roads_alberta_masked <- mask(roads_alberta, alberta_proj)
-
-# Convert sites to spatial object
-covar_locations <- covar_locations %>%
-  filter(!is.na(Longitude) & !is.na(Latitude))
-
-sites_roads <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
-sites_roads <- st_transform(sites_roads, crs(roads_alberta_masked))
-roads_vect <- vect(sites_roads)
-
-plot(roads_alberta_masked)
-points(roads_vect, col = "darkorange")
-
-roads_vals <- terra::extract(roads_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
-
-covars <- covars %>%
-  mutate(roads = roads_vals$roads)
-
-```
-
-##Rail
-```{r}
-# Load raster (human footprint TIFF) and crop to alberta provincial boundary
-rail_raster <- rast("data/chfi/roads.tif")
-
-alberta_proj_rail <- project(alberta, roads_raster)
-
-roads_alberta <- crop(roads_raster, alberta_proj_roads)
-roads_alberta_masked <- mask(roads_alberta, alberta_proj)
-
-# Convert sites to spatial object
-covar_locations <- covar_locations %>%
-  filter(!is.na(Longitude) & !is.na(Latitude))
-
-sites_roads <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
-sites_roads <- st_transform(sites_roads, crs(roads_alberta_masked))
-roads_vect <- vect(sites_roads)
-
-plot(roads_alberta_masked)
-points(roads_vect, col = "darkorange")
-
-roads_vals <- terra::extract(roads_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
-
-covar_locations_hf <- bind_cols(covar_locations_hf, roads_vals[,-1])
-
-```
-
-##Built
-```{r}
-# Load raster (human footprint TIFF) and crop to alberta provincial boundary
-built_raster <- rast("data/chfi/built.tif")
-
-alberta_proj_built <- project(alberta, built_raster)
-
-built_alberta <- crop(built_raster, alberta_proj_built)
-built_alberta_masked <- mask(built_alberta, alberta_proj)
-
-# Convert sites to spatial object
-sites_built <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
-sites_built <- st_transform(sites_built, crs(built_alberta_masked))
-built_vect <- vect(sites_built)
-
-plot(built_alberta_masked)
-points(built_vect, col = "darkorange")
-
-built_vals <- terra::extract(built_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
-
-covar_locations_hf <- bind_cols(covar_locations_hf, roads_vals[,-1])
-
-```
-
-#Cropland
-
-#Pasture
-
-#Energy
-```{r}
-# Load raster (human footprint TIFF) and crop to alberta provincial boundary
-roads_raster <- rast("data/chfi/roads.tif")
-
-alberta_proj_roads <- project(alberta, roads_raster)
-
-roads_alberta <- crop(roads_raster, alberta_proj_roads)
-roads_alberta_masked <- mask(roads_alberta, alberta_proj)
-
-# Convert sites to spatial object
-covar_locations <- covar_locations %>%
-  filter(!is.na(Longitude) & !is.na(Latitude))
-
-sites_roads <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs = 4326)
-sites_roads <- st_transform(sites_roads, crs(roads_alberta_masked))
-roads_vect <- vect(sites_roads)
-
-plot(roads_alberta_masked)
-points(roads_vect, col = "darkorange")
-
-roads_vals <- terra::extract(roads_alberta_masked, buffers_vect, fun = mean, na.rm = TRUE)
-
-covar_locations_hf <- bind_cols(covar_locations_hf, roads_vals[,-1])
-
-```
 #Write CSV files
 
 ```{r}
@@ -838,10 +854,13 @@ write.csv(coyotedetections, file = "data/coyotedetections.csv", row.names = FALS
 write.csv(lynxdetections, file = "data/lynxdetections.csv", row.names = FALSE)
 write.csv(martendetections, file = "data/martendetections.csv", row.names = FALSE)
 write.csv(fisherdetections, file = "data/fisherdetections.csv", row.names = FALSE)
+write.csv(redfoxdetections, file = "data/redfoxdetections.csv", row.names = FALSE)
 
 write.csv(coyotecounts, file = "data/coyotecounts.csv", row.names = FALSE)
 write.csv(lynxcounts, file = "data/lynxcounts.csv", row.names = FALSE)
 write.csv(martencounts, file = "data/martencounts.csv", row.names = FALSE)
 write.csv(fishercounts, file = "data/fishercounts.csv", row.names = FALSE)
+write.csv(redfoxcounts, file = "data/redfoxcounts.csv", row.names = FALSE)
+
 
 ```
