@@ -1,0 +1,88 @@
+---
+title: "Mapping Sites"
+author: "Kwasi Wrensford"
+date: "2026-03-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggfortify)
+library(ggrepel)
+library(forcats)
+library(lubridate)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(ggmap)
+library(reshape2)
+library(corrplot)
+library(elevatr)
+library(terra)
+library(mapview)
+library(tmap)
+library(sf)
+library(exactextractr)
+library(xml2)
+library(geodata)
+library(viridis)
+```
+
+##Load in covariate dataset with lat and long
+```{r}
+covars <- read.csv("data/covars.csv")
+
+covars_sf <- st_as_sf(
+  covars,
+  coords = c("Longitude", "Latitude"),
+  crs = 4326
+)
+```
+
+```{r}
+bbox <- st_bbox(covars_sf)
+
+elev <- get_elev_raster(locations = covars_sf, z = 10, clip = "bbox")
+elev <- rast(elev)
+
+hill <- terrain(elev, v = "slope", unit = "radians")
+aspect <- terrain(elev, v = "aspect", unit = "radians")
+hillshade <- shade(hill, aspect)
+hillshade_gray <- terra::app(hillshade, fun = mean)
+
+map_pc1 <- 
+  tm_shape(hillshade_gray) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.5) + 
+  tm_shape(elev) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.4) + 
+  tm_shape(covars_sf) + 
+  tm_dots(col = "PC1", palette = "viridis", size = 0.5) +
+  tm_layout(title = "Climate PC1 (Overall Climate)")
+
+map_pc2 <- 
+  tm_shape(hillshade_gray) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.5) + 
+  tm_shape(elev) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.4) + 
+  tm_shape(covars_sf) + 
+  tm_dots(col = "PC2", palette = "viridis", size = 0.5) +
+  tm_layout(title = "Climate PC2 (Aridity)")
+
+map_hf <- 
+  tm_shape(hillshade_gray) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.5) + 
+  tm_shape(elev) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.4) + 
+  tm_shape(covars_sf) + 
+  tm_dots(col = "hf", palette = "viridis", size = 0.5) +
+  tm_layout(title = "Human Footprint")
+
+tmap_arrange(map_pc1, map_pc2, map_hf, ncol = 3)
+```
