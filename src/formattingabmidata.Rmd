@@ -12,6 +12,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(ggfortify)
+library(ggrepel)
 library(forcats)
 library(lubridate)
 library(unmarked)
@@ -74,6 +75,58 @@ study_main_reports <- study_main_reports %>%
 total_operation_days<- vroom::vroom("data/Total Days of Operations ABMI EH 2014-2020.csv")
 
 camera_operation_dates <- vroom::vroom("data/Operation Dates ABmi EH 2014-2018.csv")
+```
+
+##Independent detections
+```{r}
+#Generate delta time (intervals between detection)
+study_intervals <- study_main_reports %>%
+  arrange(species_common_name, location, image_date_time) %>%
+  group_by(species_common_name, location) %>%
+  mutate(delta_time = as.numeric(difftime(image_date_time, lag(image_date_time), units = "mins"))) %>%
+  ungroup()
+
+#Visualize on a histogram
+ggplot(study_intervals, aes(x = delta_time)) +
+  geom_histogram() +
+  facet_wrap(~ species_common_name)
+
+
+ggplot(study_intervals, aes(x = delta_time)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  facet_wrap(~ species_common_name, scales = "free_y") +
+  coord_cartesian(xlim = c(0, 120))+
+  theme_minimal() +
+  labs(
+    title = "Detection Interval Histograms (0–120 minutes)",
+    x = "Minutes since previous detection",
+    y = "Frequency"
+  )
+```
+
+```{r}
+threshold <- 5
+
+independent_detections <- study_intervals %>%
+  arrange(species_common_name, location, image_date_time) %>%
+  group_by(species_common_name, location) %>%
+  mutate(
+    independent = if_else(
+      is.na(delta_time) | delta_time > threshold,
+      TRUE,
+      FALSE
+    )
+  ) %>%
+  ungroup()
+
+independent_events <- independent_detections %>%
+  filter(independent)
+
+independent_events %>%
+  group_by(species_common_name) %>%
+  summarize(
+    n = n()
+  )
 ```
 
 ##Covariate data
@@ -578,35 +631,65 @@ colnames(climate_pcs) <- c("PC1", "PC2")
 
 # Loadings (variable contributions to PCs)
 round(pca_res$rotation[, 1:2], 3)
+load_df <- as.data.frame(pca_res$rotation[, 1:2])
+load_df$label <- rownames(load_df)
 
 # Bind with site info
 climate_sites <- cbind(covar_locations, climate_pcs)
 
-autoplot(pca_res, data = climate_sites, colour = "Latitude",
-         loadings = TRUE, loadings.label = TRUE, loadings.label.size = 3)+
-  theme_classic()
+#Plot PC's
+mult <- min(
+  (max(autoplot(pca_res)$data$PC1) - min(autoplot(pca_res)$data$PC1)) /
+    (max(load_df$PC1) - min(load_df$PC1)),
+  (max(autoplot(pca_res)$data$PC2) - min(autoplot(pca_res)$data$PC2)) /
+    (max(load_df$PC2) - min(load_df$PC2))
+)
 
-# Plot
-ggplot(climate_sites, aes(x = PC1, y = PC2, label = location)) +
-  geom_point(size = 3, color = "steelblue") +
-  geom_text(vjust = -0.5, size = 3) +
-  theme_minimal() +
-  labs(title = "Sites in PCA Space",
-       x = "PC1",
-       y = "PC2")+
-  theme_minimal()
+load_df[, c("PC1", "PC2")] <- load_df[, c("PC1", "PC2")] * mult
 
+pc_plot <- autoplot(pca_res, data = climate_sites, color = "Latitude",
+         loadings = TRUE, loadings.color = "black", 
+         loadings.label = FALSE)+
+  geom_point(aes(color = Latitude), size = 3) +
+  scale_color_gradient(low = "gold", high = "purple")+
+  labs(x = "PC1 - Overall Climate",
+       y = "PC2 - Aridity")+
+  theme_classic() +
+  theme(axis.title = element_text(size = 15))
 
+pc_plot + 
+  geom_text_repel(
+    data = load_df,
+    aes(x = PC1, y = PC2, label = label),
+    fontface = "bold",
+    size = 4,
+    color = "black",
+    box.padding = 0.5,
+    point.padding = 0.3,
+    segment.color = "grey40",
+    force = 3,
+    max.overlaps = Inf
+)
 ```
 
 ##ABMI Linear Features
 ```{r}
 linear_abmi <- covariates_unique %>%
-  dplyr::select(location, Latitude, Longitude, TransmissionLine, TransmissionLine_buf, Pipeline_buf, RoadHardSurface_buf, RoadVegetatedVerge_buf, RoadTrailVegetated_buf, SeismicLineNarrow_buf, SeismicLineWide_buf, RailHardSurface_buf, RailVegetatedVerge_buf)
+  dplyr::select(location, Latitude, Longitude, TransmissionLine_buf, Pipeline_buf, SeismicLineNarrow_buf, SeismicLineWide_buf)
 
 linear_abmi <- linear_abmi %>%
-  mutate(abmi_linear = rowSums(.[4:13]))
+  mutate(abmi_linear = rowSums(.[4:7]))
 ```
+
+##ABMI Vegetation
+```{r}
+veg_abmi <- covariates_unique %>%
+  dplyr::select(location, Latitude, Longitude, TransmissionLine_buf, Pipeline_buf, SeismicLineNarrow_buf, SeismicLineWide_buf)
+
+linear_abmi <- linear_abmi %>%
+  mutate(abmi_linear = rowSums(.[4:7]))
+```
+
 ##Canada Human Footprint index
 
 ```{r}
@@ -654,8 +737,8 @@ sites_hf <- st_as_sf(covar_locations, coords = c("Longitude", "Latitude"), crs =
 sites_hf <- st_transform(sites_hf, crs(hf_alberta_masked))
 sites_vect <- vect(sites_hf)
 
-plot(hf_alberta_masked)
-plot(sites_vect, add = TRUE, col = "darkorange")
+plot(hf_alberta_masked$hf)
+plot(sites_vect, add = TRUE, col = "darkorange", cex = 0.5)
 
 buffers <- st_buffer(sites_hf, dist = 5000)
 buffers_vect <- vect(buffers)
@@ -688,6 +771,10 @@ agriculture_vals <- terra::extract(hf_agriculture, buffers_vect, fun = mean, na.
 
 covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 
+```
+
+
+```{r}
 climate_sites <- climate_sites %>%
   filter(location != ("1095-SE"))
 
@@ -713,10 +800,12 @@ covars <- covars %>%
   mutate(
     baited = cam_orientation %in% c("NE", "SW")
   )
+```
 
+```{r}
 #Add abmi linear feature data
 covars <-covars %>%
-  bind_cols(linear_abmi[14])
+  bind_cols(linear_abmi[8])
 
 #Correlation
 hf_corr_data <- covars %>%

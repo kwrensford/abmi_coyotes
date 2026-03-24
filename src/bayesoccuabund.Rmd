@@ -55,6 +55,142 @@ fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
 redfoxcounts <- as.matrix(read.csv("data/redfoxcounts.csv"))
 ```
 
+#Load in covariate data
+
+```{r}
+covars <- read.csv("data/covars.csv")
+```
+
+```{r}
+cor.test(scale(covars$linear), scale(covars$abmi_linear))
+
+covars$PC1<-scale(covars$PC1)
+covars$PC2<-scale(covars$PC2)
+covars$hf<-scale(covars$hf)
+covars$baited <- as.numeric(covars$baited)
+```
+
+#Formatting count data into one row per site
+```{r}
+y <- coyotecounts
+cams <- covars
+
+dat_long <- Y %>%
+  as.data.frame() %>%
+  mutate(camera = cams$location,
+         site   = cams$site) %>%
+  pivot_longer(
+    cols = starts_with("o"),
+    names_to = "occ_raw",
+    values_to = "count"
+  ) %>%
+  filter(!is.na(count)) %>%   # keep only deployed camera×occasion cells
+  mutate(
+    occ = as.integer(str_extract(occ_raw, "(?<=o)\\d+"))
+  )
+
+```
+
+
+```{r}
+dat_long <- dat_long %>%
+  arrange(site, camera, occ) %>%
+  group_by(site) %>%
+  mutate(rep_id = row_number()) %>%
+  ungroup()
+
+##Baited status
+bait_df <- covars
+bait_df <- bait_df %>%
+  mutate(camera = location)
+
+dat_long <- dat_long %>%
+  left_join(bait_df, by = c("site", "camera"))
+
+y_wide <- dat_long %>%
+  dplyr::select(site, rep_id, count) %>%
+  pivot_wider(names_from = rep_id, values_from = count) %>%
+  arrange(site)
+
+y_mat <- as.matrix(y_wide[,-1])
+rownames(y_mat) <- y_wide$site_id
+
+##Baited covariate for detection
+bait_long <- dat_long %>%
+  arrange(site, camera, occ) %>%      # EXACT SAME ORDERING
+  group_by(site) %>%
+  mutate(rep_id = row_number()) %>%   # EXACT SAME rep_id
+  ungroup()
+
+bait_wide <- bait_long %>%
+  dplyr::select(site, rep_id, baited) %>% 
+  tidyr::pivot_wider(
+    names_from = rep_id,
+    values_from = baited
+  ) %>%
+  arrange(site)
+
+bait_mat <- as.matrix(bait_wide[,-1])
+rownames(bait_mat) <- bait_wide$site
+
+##Camera ID
+cam_wide <- bait_wide <- bait_long %>%
+  dplyr::select(site, rep_id, camera) %>% 
+  tidyr::pivot_wider(
+    names_from = rep_id,
+    values_from = camera
+  ) %>%
+  arrange(site)
+
+cam_mat <- as.matrix(cam_wide[,-1])
+rownames(cam_mat)<- cam_wide$site
+```
+
+```{r}
+site_covars <- covars %>%
+  group_by(site) %>%
+  summarise(
+    PC1 = mean(PC1),
+    PC2 = mean(PC2),
+    hf = mean(hf)
+  )
+
+obs_covars <- covars %>%
+  dplyr::select(location, site, baited) %>%
+  pivot_wider(
+    names_from = location,
+    values_from = baited
+  )
+
+site_covars <-site_covars[match(rownames(y_mat),
+                              obs_covars$site)]
+
+
+
+occasion_counts <- apply(!is.na(y_mat), 1, sum)
+
+
+which(is.na(occasion_counts))
+
+expand_covariate <- function(cov_vector, occasion_counts) {
+  maxK <- max(occasion_counts)
+  out <- matrix(NA, nrow = length(cov_vector), ncol = maxK)
+  
+  for (i in seq_along(cov_vector)) {
+    K <- occasion_counts[i]
+    if (K > 0) {
+      out[i, 1:K] <- cov_vector[i]
+    }
+  }
+  
+  out
+}
+
+baited_mat <- expand_covariate(covars$baited, occasion_counts)
+
+obs_covars <- obs_covars %>% dplyr::select(-site)
+```
+
 #Visualizing overlap
 ```{r}
 count_list <- list(
@@ -175,19 +311,7 @@ ggplot(overlap_df, aes(sp1, sp2, fill = overlap_sites)) +
 
 ```
 
-#Load in covariate data
 
-```{r}
-covars <- read.csv("data/covars.csv")
-```
-
-```{r}
-
-covars$PC1<-scale(covars$PC1)
-covars$PC2<-scale(covars$PC2)
-covars$hf<-scale(covars$hf)
-covars$baited <- as.numeric(covars$baited)
-```
 
 ##Frequentist N-mixture in unmarked
 ```{r}
@@ -197,7 +321,7 @@ umf_coyote <- unmarkedFramePCount(
 )
 
 coyote_nmix <- pcount(
-formula = ~ baited ~ 
+formula = ~ bait + (1|camera) ~ 
   PC1 * hf + PC2 * hf,
 data = umf_coyote,
 mixture = "P"
@@ -208,6 +332,16 @@ plotEffects(coyote_nmix, "state", "PC1")
 plotEffects(coyote_nmix, "state", "PC2")
 plotEffects(coyote_nmix, "state", "hf")
 plotEffects(coyote_nmix, "det", "baited")
+
+coyote_lambda <- predict(coyote_nmix, type = "state")
+
+covars$coyote_abund <- coyote_lambda$Predicted
+
+lm_coyote <- lm(coyote_abund~hf, data = covars)
+summary(lm_coyote)
+
+covars$coyote_resid <- resid(lm_coyote)
+cor.test(covars$coyote_resid, covars$hf)
 ```
 
 #Coyote disaggregated human footprint
@@ -227,10 +361,10 @@ plotEffects(coyote_nmix_linear, "state", "linear")
 plotEffects(coyote_nmix_linear, "det", "baited")
 ```
 ```{r}
-#Linear features
+#ABMI Linear features
 coyote_nmix_linearabmi <- pcount(
 formula = ~ baited ~ 
-  PC1 * abmi_linear + PC2 * abmi_linear,
+  PC1 * scale(abmi_linear) + PC2 * scale(abmi_linear),
 data = umf_coyote,
 mixture = "P"
 )
@@ -282,7 +416,7 @@ umf_lynx <- unmarkedFramePCount(
 
 lynx_nmix <- pcount(
 formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf,
+  PC1 * hf + PC2 * hf + scale(coyote_resid),
 data = umf_lynx,
 mixture = "P"
 )
@@ -291,6 +425,7 @@ lynx_nmix
 plotEffects(lynx_nmix, type = "state", covariate = "PC1")
 plotEffects(lynx_nmix, type = "state", covariate = "PC2")
 plotEffects(lynx_nmix, type = "state", covariate = "hf")
+plotEffects(lynx_nmix, type = "state", covariate = "coyote_resid")
 plotEffects(lynx_nmix, "det", "baited")
 
 ```
@@ -302,8 +437,8 @@ umf_marten <- unmarkedFramePCount(
 )
 
 marten_nmix <- pcount(
-formula = ~ 1 ~ 
-  PC1 * hf + PC2 * hf,
+formula = ~ baited ~ 
+  PC1 * hf + PC2 * hf + scale(coyote_resid),
 data = umf_marten,
 mixture = "P"
 )
@@ -312,8 +447,10 @@ marten_nmix
 plotEffects(marten_nmix, type = "state", covariate = "PC1")
 plotEffects(marten_nmix, type = "state", covariate = "PC2")
 plotEffects(marten_nmix, type = "state", covariate = "hf")
+plotEffects(marten_nmix, type = "state", covariate = "coyote_resid")
 plotEffects(marten_nmix, "det", "baited")
 ```
+
 #Fisher nmix abundance in unmarked
 ```{r}
 umf_fisher <- unmarkedFramePCount(
@@ -323,7 +460,7 @@ umf_fisher <- unmarkedFramePCount(
 
 fisher_nmix <- pcount(
 formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf,
+  PC1 * hf + PC2 * hf + coyote_resid,
 data = umf_fisher,
 mixture = "P"
 )
@@ -332,6 +469,7 @@ fisher_nmix
 plotEffects(fisher_nmix, type = "state", covariate = "PC1")
 plotEffects(fisher_nmix, type = "state", covariate = "PC2")
 plotEffects(fisher_nmix, type = "state", covariate = "hf")
+plotEffects(fisher_nmix, type = "state", covariate = "coyote_resid")
 plotEffects(fisher_nmix, "det", "baited")
 ```
 
@@ -344,7 +482,7 @@ umf_redfox <- unmarkedFramePCount(
 
 redfox_nmix <- pcount(
 formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf,
+  PC1 * hf + PC2 * hf + coyote_resid,
 data = umf_redfox,
 mixture = "P"
 )
@@ -353,19 +491,22 @@ redfox_nmix
 plotEffects(redfox_nmix, type = "state", covariate = "PC1")
 plotEffects(redfox_nmix, type = "state", covariate = "PC2")
 plotEffects(redfox_nmix, type = "state", covariate = "hf")
+plotEffects(redfox_nmix, type = "state", covariate = "coyote_resid")
 plotEffects(redfox_nmix, "det", "baited")
 
 ```
 
 #Stan N-mixture using ubms
 ```{r}
+##Coyote
 umf_coyote <- unmarkedFramePCount(
-  y = coyotecounts,
-  siteCovs = covars
+  y = y_mat,
+  siteCovs = site_covars,
+  obsCovs = list(bait = bait_mat, camera = cam_mat)
 )
 
-coyote_nmix_stan <- stan_pcount(formula =  ~ baited  ~ 
-                       PC1 * hf + PC2 * hf,
+coyote_nmix_stan <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
                      data = umf_coyote,
                      chains = 3,
                      iter = 500,
@@ -384,6 +525,7 @@ coyote_gof<-gof(coyote_nmix_stan, draws=100)
 coyote_gof
 plot(coyote_gof)
 ```
+
 ```{r}
 m <- coyote_nmix_stan
 post <- as.data.frame(rstan::extract(m@stanfit))
@@ -433,19 +575,19 @@ ggplot(effects_summary,
 
 ```{r}
 pc1data_lohf <- data.frame(
-  PC1 = seq(min(covars$PC1, na.rm = TRUE),
-           max(covars$PC1, na.rm = TRUE),
+  PC1 = seq(min(site_covars$PC1, na.rm = TRUE),
+           max(site_covars$PC1, na.rm = TRUE),
            length.out = 1000),
-  PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
-  hf = quantile(covars$hf, 0.25, na.rm = TRUE)
+  PC2 = mean(site_covars$PC2, na.rm = TRUE),  # fix other covariates
+  hf = quantile(site_covars$hf, 0.25, na.rm = TRUE)
 )
 
 pc1data_hihf <- data.frame(
-  PC1 = seq(min(covars$PC1, na.rm = TRUE),
-           max(covars$PC1, na.rm = TRUE),
+  PC1 = seq(min(site_covars$PC1, na.rm = TRUE),
+           max(site_covars$PC1, na.rm = TRUE),
            length.out = 1000),
-  PC2 = mean(covars$PC2, na.rm = TRUE),  # fix other covariates
-  hf = quantile(covars$hf, 0.75, na.rm = TRUE)
+  PC2 = mean(site_covars$PC2, na.rm = TRUE),  # fix other covariates
+  hf = quantile(site_covars$hf, 0.75, na.rm = TRUE)
 )
 
 pred_coyote_pc1_lohf <- ubms::predict(
@@ -480,7 +622,7 @@ coyote_pc1 <- ggplot(df_pc1_coyote, aes(x = cov)) +
   geom_ribbon(aes(ymin = lower_hi, ymax = upper_hi), fill = "darkorange3", alpha = 0.2) +
   geom_line(aes(y = pred_hi), color = "darkorange3", linewidth= 1) +
   scale_color_manual(values = hf_labels) +
-  labs(y = "Coyote occupancy probability",
+  labs(y = "Coyote abundance",
        x = "Climate PC1",
        title = "Coyote abundance",
        colors = "Human footprint")+
@@ -489,20 +631,57 @@ coyote_pc1 <- ggplot(df_pc1_coyote, aes(x = cov)) +
 coyote_pc1
 ```
 
+```{r}
+##Red Fox
+umf_coyote <- unmarkedFramePCount(
+  y = y_mat,
+  siteCovs = site_covars,
+  obsCovs = list(bait = bait_mat, camera = cam_mat)
+)
 
+coyote_nmix_stan <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
+                     data = umf_coyote,
+                     chains = 3,
+                     iter = 500,
+                     cores = 3)
+
+coyote_nmix_stan
+plot_effects(coyote_nmix_stan, submodel = "state")
+plot_effects(coyote_nmix_stan, submodel = "det")
+
+traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
+plot_residuals(coyote_nmix_stan, submodel = "state", covariate = "hf")
+
+plot_posteriors(coyote_nmix_stan)
+
+coyote_gof<-gof(coyote_nmix_stan, draws=100)
+coyote_gof
+plot(coyote_gof)
+```
 #Custom N-mixture in Stan
+```{stan}
+data {
+  int<lower=1> J;                 // number of sites
+  int<lower=1> I;                 // number of cameras (S * cams_per_site)
+  int<lower=1> K;                 // number of sampling occasions (weeks)
+  int<lower=1> S;                 // number of site-level abundance covariates (e.g., 4)
+  matrix[J, S] X;                 // site covariate matrix (row = site)
+  int<lower=1, upper=
+```
+
 
 ```{stan}
 // file: nmix_site_cam_orientation.stan
 data {
-  int<lower=1> S;                 // number of sites
-  int<lower=1> C;                 // number of cameras (S * cams_per_site)
-  int<lower=1> J;                 // number of sampling occasions (weeks)
-  int<lower=1> K;                 // number of site-level abundance covariates (e.g., 4)
-  matrix[S, K] X;                 // site covariate matrix (row = site)
+  int<lower=1> J;                 // number of sites
+  int<lower=1> I;                 // number of cameras (S * cams_per_site)
+  int<lower=1> K;                 // number of sampling occasions (weeks)
+  int<lower=1> S;                 // number of site-level abundance covariates (e.g., 4)
+  matrix[J, S] X;                 // site covariate matrix (row = site)
   int<lower=1,upper=S> site_of_cam[C]; // map camera -> site (length C)
-  int<lower=0> y[C, J];           // observed counts per camera x occasion
-  int<lower=0,upper=1> baited[C, J]; // baited covariate per camera x occasion (0/1)
+  int<lower=0> y[I, K];           // observed counts per camera x occasion
+  int<lower=0,upper=1> baited[I, K]; // baited covariate per camera x occasion (0/1)
   int<lower=1> N_orient;          // number of orientation levels (e.g., 4)
   int<lower=1,upper=N_orient> orient[C]; // camera orientation level per camera (1..4)
   int<lower=0> Nmax_site[S];     // per-site Nmax to sum over (>= max observed at site)
@@ -668,11 +847,4 @@ fit <- mod$sample(data = stan_data,
 
 print(fit$summary())
 
-```
-
-
-#Multi N-mixture
-````{r}
-abund.ms.formula <- ~ PC1 * hf + PC2 * hf
-det.ms.formula <- ~ baited
 ```
