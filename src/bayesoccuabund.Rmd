@@ -505,7 +505,7 @@ umf_coyote <- unmarkedFramePCount(
   obsCovs = list(bait = bait_mat, camera = cam_mat)
 )
 
-coyote_nmix_stan <- stan_pcount(formula =  ~ bait
+coyote_nmix_stan <- stan_pcount(formula =  ~ bait + (1|site:camera)
                                 ~ PC1 * hf + PC2 * hf,
                      data = umf_coyote,
                      chains = 3,

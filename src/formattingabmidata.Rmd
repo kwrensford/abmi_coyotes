@@ -77,6 +77,37 @@ total_operation_days<- vroom::vroom("data/Total Days of Operations ABMI EH 2014-
 camera_operation_dates <- vroom::vroom("data/Operation Dates ABmi EH 2014-2018.csv")
 ```
 
+##Latitudinal Partitioning
+```{r}
+##Visualize detections by latitude for each species
+study_main_reports %>%
+  ggplot(aes(x = latitude)) +
+  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
+  facet_wrap(~ species_common_name, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Latitude Distribution of Camera Trap Detections",
+    x = "Latitude",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+
+##Set latitudinal thresholds
+lo_lat <- 54
+hi_lat <- 57
+  
+##Create latitude threshold covariate for each observation
+
+study_main_reports <- study_main_reports %>%
+  mutate(
+    latitude_region = case_when(
+      latitude > hi_lat ~ "High latitude",
+      latitude < hi_lat & latitude > lo_lat~ "Mid latitude",
+      latitude <lo_lat ~ "Low latitude"
+    )
+  )
+```
+
 ##Independent detections
 ```{r}
 #Generate delta time (intervals between detection)
@@ -105,6 +136,7 @@ ggplot(study_intervals, aes(x = delta_time)) +
 ```
 
 ```{r}
+#Set independence threshold to 5 minutes
 threshold <- 5
 
 independent_detections <- study_intervals %>%
@@ -127,6 +159,8 @@ independent_events %>%
   summarize(
     n = n()
   )
+
+study_main_reports <- independent_events
 ```
 
 ##Covariate data
@@ -148,6 +182,7 @@ ehs_humanfootprint_merged <- ehs_humanfootprint %>%
 ##Make sure covariate locations match detection locations
 
 ```{r}
+#Extract cam locations from image reports
 camlocations <- all_main_reports %>%
   distinct(location, .keep_all = TRUE)
 
@@ -169,6 +204,7 @@ filter(check_coords, lat_mismatch | lon_mismatch)
 ```
 
 ```{r}
+##Replace incorrect coordinates in covariate dataset with correct ones from cam reports
 covariates_fixed <- check_coords %>%
   mutate(
     Latitude  = ifelse(lat_mismatch, latitude_cam, Lat),
@@ -180,6 +216,7 @@ covariates_fixed <- check_coords %>%
 ##Partitioning multi-species data for natural regions only where all four species are detected
 
 ```{r}
+#Plotting camera locations by natural region
 ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = NR)) + 
   theme_minimal()+
   geom_point()
@@ -192,7 +229,7 @@ ggplot(covariates_fixed, aes(x = NR, fill = NR)) +
 ```
 
 ```{r}
-
+#Identify how many of each species are observed in each Natural Region
 study_main_reports <- study_main_reports %>%
   left_join(covariates_fixed %>% dplyr::select(location, NR),
             by = "location")
@@ -244,7 +281,7 @@ camera_operation_dates_v2<-study_image_reports %>%
     start_date_time = min(image_date_time),
     end_date_time = max(image_date_time)
   )
-##Camera operation matrix
+##Build a Camera operation matrix
 camera_operation_dates_filtered<-camera_operation_dates_v2%>%
   filter(!is.na(start_date_time))
 
@@ -575,7 +612,7 @@ identical(rownames(redfoxdetections), covariates_unique$location)
 ##Dimension reduction of climate data
 
 ```{r}
-## Climate variables
+## Annual Climate variables
 #1) Annual variables:
 
 #Directly calculated annual variables:
@@ -586,15 +623,9 @@ identical(rownames(redfoxdetections), covariates_unique$location)
 
 #MCMT            mean coldest month temperature (°C),
 
-#TD                   temperature difference between MWMT and MCMT, or continentality (°C),
-
 #MAP               mean annual precipitation (mm),
 
-#MSP                May to September precipitation (mm),
-
 #AHM  annual heat-moisture index (MAT+10)/(MAP/1000))
-
-#SHM               summer heat-moisture index ((MWMT)/(MSP/1000))
 
 #FFP                Frost free period
 
@@ -696,7 +727,7 @@ linear_abmi <- linear_abmi %>%
 library(terra)
 library(geodata)
 
-# Load raster (human footprint TIFF) and crop to alberta provincial boundary
+# Load rasters (human footprint TIFF) and crop to alberta provincial boundary
 hf_raster <- rast("data/chfi/cum_threat2020.02.18.tif")
 roads_raster <- rast("data/chfi/roads.tif")
 rail_raster <- rast("data/chfi/rail.tif")
@@ -719,6 +750,8 @@ pasture_raster <- resample(pasture_raster, hf_raster)
 hf_stack <- c(hf_raster, roads_raster, rail_raster, built_raster, oil_gas_raster, forestry_raster, mines_raster, crop_raster, pasture_raster)
 
 names(hf_stack) <- c("hf", "roads", "rail", "built", "oil_gas", "forestry", "mines", "crop", "pasture")
+
+##Obtain Canada and Alberta boundary shapefiles
 
 url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
 
@@ -773,8 +806,9 @@ covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 
 ```
 
-
+##Compiling Covariates into dataframe
 ```{r}
+##Build covariate dataframe
 climate_sites <- climate_sites %>%
   filter(location != ("1095-SE"))
 
@@ -950,6 +984,5 @@ write.csv(lynxcounts, file = "data/lynxcounts.csv", row.names = FALSE)
 write.csv(martencounts, file = "data/martencounts.csv", row.names = FALSE)
 write.csv(fishercounts, file = "data/fishercounts.csv", row.names = FALSE)
 write.csv(redfoxcounts, file = "data/redfoxcounts.csv", row.names = FALSE)
-
 
 ```
