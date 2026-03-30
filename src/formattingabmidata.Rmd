@@ -28,6 +28,8 @@ library(exactextractr)
 library(xml2)
 library(geodata)
 library(viridis)
+library(scales)
+library(colorspace)
 ```
 
 ##Read in and format camera data
@@ -217,11 +219,11 @@ covariates_fixed <- check_coords %>%
 
 ```{r}
 #Plotting camera locations by natural region
-ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = NR)) + 
+ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = NSR)) + 
   theme_minimal()+
   geom_point()
 
-ggplot(covariates_fixed, aes(x = NR, fill = NR)) + 
+ggplot(covariates_fixed, aes(x = NSR, fill = NSR)) + 
   theme_minimal()+
   geom_bar()
 
@@ -231,36 +233,57 @@ ggplot(covariates_fixed, aes(x = NR, fill = NR)) +
 ```{r}
 #Identify how many of each species are observed in each Natural Region
 study_main_reports <- study_main_reports %>%
-  left_join(covariates_fixed %>% dplyr::select(location, NR),
+  left_join(covariates_fixed %>% dplyr::select(location, NR, NSR),
             by = "location")
 
 species_list <- unique(study_main_reports$species_common_name)
 
-regions_with_all <- study_main_reports %>%
-  group_by(NR) %>%
-  summarise(species_present = list(unique(species_common_name))) %>%
-  filter(all(species_list %in% species_present)) %>%
-  pull(NR)
-
-detections_filtered <- study_main_reports %>%
-  filter(NR %in% regions_with_all)
-
 detections_summary <- study_main_reports %>%
-  group_by(NR, species_common_name) %>%
+  group_by(NSR, NR, species_common_name) %>%
   summarise(count = n(), .groups = "drop")
 
+ region_colors <- c(
+  "Rocky Mountain"  = "#1b9e77",
+  "Boreal"          = "#d95f02",
+  "Parkland"        = "#7570b3",
+  "Grassland"       = "#e7298a",
+  "Canadian Shield" = "#66a61e",
+  "Foothills"       = "#e6ab02",
+  "Unknown"         = "grey50"   # for NA
+) 
 
-ggplot(detections_summary, aes(x = NR, y = count, fill = species_common_name)) +
-  geom_bar(stat = "identity") +
-  theme_minimal() +
-  labs(title = "Species detections by natural region",
-       x = "Natural region",
-       y = "Number of detections",
-       fill = "Species") +
+ detections_summary <- detections_summary %>%
+  mutate(
+    NR_clean = ifelse(is.na(NR), "Unknown", NR),
+    NSR = factor(NSR, levels = unique(NSR[order(NR_clean, NSR)]))
+  )
+ 
+ detections_plot <- detections_summary %>%
+  mutate(NR_clean = ifelse(is.na(NR), "Unknown", NR)) %>%
+  group_by(NR_clean) %>%
+  mutate(
+    subregion_color = lighten(
+      region_colors[NR_clean],
+      amount = seq(0, 0.4, length.out = n_distinct(NSR))
+    )[as.numeric(factor(NSR))]
+  ) %>%
+  ungroup()
+
+ggplot(detections_plot,
+       aes(x = NSR, y = count, fill = subregion_color, color = NR)) +
+  geom_col() +
+  facet_wrap(~ species_common_name, scales = "free_y") +
+  scale_color_manual(region_colors)+
+  scale_fill_identity() +
+  labs(
+    x = "Subregion",
+    y = "Detections",
+    fill = "Natural Region",
+    title = "Detections per subregion (shaded by natural region)"
+  ) +
+  theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-study_main_reports <- study_main_reports %>%
-  filter(NR == "Boreal")
 ```
 
 ##Create detection matrices for each species

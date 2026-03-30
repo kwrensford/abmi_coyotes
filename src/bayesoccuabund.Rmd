@@ -38,6 +38,10 @@ library(spOccupancy)
 library(MCMCvis)
 library(forestplot)
 library(purrr)
+library(sjPlot)
+library(sjmisc)
+library(ggeffects)
+
 ```
 
 ```{r}
@@ -71,6 +75,182 @@ covars$baited <- as.numeric(covars$baited)
 ```
 
 #Formatting count data into one row per site
+```{r}
+make_site_level_mats <- function(Y, covars, occ_prefix = "o") {
+  library(dplyr)
+  library(tidyr)
+  library(stringr)
+  
+  ### ---------------------------------------------------------
+  ### 0. Fix duplicated occasion names BEFORE tibble conversion
+  ### ---------------------------------------------------------
+  
+  # Extract original occasion columns
+  occ_cols <- grep(paste0("^", occ_prefix), colnames(Y), value = TRUE)
+  
+  # Count how many times each base name appears
+  occ_base <- sub(paste0("^", occ_prefix), "", occ_cols)
+  K <- length(unique(occ_base))          # occasions per year
+  total_K <- length(occ_cols)            # total columns
+  n_years <- total_K / K                 # infer number of years
+  
+  if (total_K %% K != 0) {
+    stop("Occasion columns do not divide evenly into years. Check your matrix.")
+  }
+  
+  # Build new unique names: y1_o1, y1_o2, ..., y2_o1, y2_o2, ...
+  year_index <- rep(seq_len(n_years), each = K)
+  occ_index  <- rep(seq_len(K), times = n_years)
+  
+  new_names <- paste0("y", year_index, "_o", occ_index)
+  
+  # Apply new names BEFORE tibble conversion
+  colnames(Y)[colnames(Y) %in% occ_cols] <- new_names
+  
+  ### ---------------------------------------------------------
+  ### 1. Now safely convert to tibble
+  ### ---------------------------------------------------------
+  Y <- as_tibble(Y)
+  covars <- as_tibble(covars)
+  
+  ### ---------------------------------------------------------
+  ### 2. Standardize covariate names
+  ### ---------------------------------------------------------
+  covars_std <- covars %>%
+    rename(
+      camera = location,
+      site   = site,
+      baited = baited
+    )
+  
+  ### ---------------------------------------------------------
+  ### 3. Build long-format table
+  ### ---------------------------------------------------------
+  dat_long <- Y %>%
+    mutate(
+      camera = covars_std$camera,
+      site   = covars_std$site
+    ) %>%
+    pivot_longer(
+      cols = all_of(new_names),
+      names_to = "occ_full",
+      values_to = "count"
+    ) %>%
+    filter(!is.na(count)) %>%
+    mutate(
+      year = as.integer(str_extract(occ_full, "(?<=y)\\d+(?=_)")),
+      occ  = as.integer(str_extract(occ_full, "(?<=_o)\\d+"))
+    ) %>%
+    arrange(site, camera, year, occ) %>%
+    group_by(site) %>%
+    mutate(rep_id = row_number()) %>%
+    ungroup()
+  
+  ### ---------------------------------------------------------
+  ### 4. Add baited status
+  ### ---------------------------------------------------------
+  bait_df <- covars_std %>% dplyr::select(site, camera, baited)
+  
+  dat_long <- dat_long %>%
+    left_join(bait_df, by = c("site", "camera"))
+  
+  ### ---------------------------------------------------------
+  ### 5. Build wide matrices
+  ### ---------------------------------------------------------
+  
+  # Count matrix
+  y_wide <- dat_long %>%
+    dplyr::select(site, rep_id, count) %>%
+    pivot_wider(names_from = rep_id, values_from = count) %>%
+    arrange(site)
+  
+  y_mat <- as.matrix(y_wide[,-1])
+  rownames(y_mat) <- y_wide$site
+  
+  # Bait matrix
+  bait_wide <- dat_long %>%
+    dplyr::select(site, rep_id, baited) %>%
+    pivot_wider(names_from = rep_id, values_from = baited) %>%
+    arrange(site)
+  
+  bait_mat <- as.matrix(bait_wide[,-1])
+  rownames(bait_mat) <- bait_wide$site
+  
+  # Camera ID matrix
+  cam_wide <- dat_long %>%
+    dplyr::select(site, rep_id, camera) %>%
+    pivot_wider(names_from = rep_id, values_from = camera) %>%
+    arrange(site)
+  
+  cam_mat <- as.matrix(cam_wide[,-1])
+  rownames(cam_mat) <- cam_wide$site
+  
+  ### ---------------------------------------------------------
+  ### Return everything
+  ### ---------------------------------------------------------
+  list(
+    y_mat = y_mat,
+    bait_mat = bait_mat,
+    cam_mat = cam_mat,
+    dat_long = dat_long,
+    K = K,
+    n_years = n_years
+  )
+}
+```
+
+```{r}
+##Coyote data
+coyote_out <- make_site_level_mats(
+  Y = coyotecounts,
+  covars = covars
+)
+
+coyote_y     <- coyote_out$y_mat
+coyote_bait  <- coyote_out$bait_mat
+coyote_camid <- coyote_out$cam_mat
+
+##Red Fox
+redfox_out <- make_site_level_mats(
+  Y = redfoxcounts,
+  covars = covars
+)
+
+redfox_y     <- redfox_out$y_mat
+redfox_bait  <- redfox_out$bait_mat
+redfox_camid <- redfox_out$cam_mat
+
+##Lynx
+lynx_out <- make_site_level_mats(
+  Y = lynxcounts,
+  covars = covars
+)
+
+lynx_y     <- lynx_out$y_mat
+lynx_bait  <- lynx_out$bait_mat
+lynx_camid <- lynx_out$cam_mat
+
+##Martenlynx
+marten_out <- make_site_level_mats(
+  Y = martencounts,
+  covars = covars
+)
+
+marten_y     <- marten_out$y_mat
+marten_bait  <- marten_out$bait_mat
+marten_camid <- marten_out$cam_mat
+
+##Fisher
+fisher_out <- make_site_level_mats(
+  Y = fishercounts,
+  covars = covars
+)
+
+fisher_y     <- fisher_out$y_mat
+fisher_bait  <- fisher_out$bait_mat
+fisher_camid <- fisher_out$cam_mat
+```
+
 ```{r}
 y <- coyotecounts
 cams <- covars
@@ -146,51 +326,6 @@ cam_mat <- as.matrix(cam_wide[,-1])
 rownames(cam_mat)<- cam_wide$site
 ```
 
-```{r}
-site_covars <- covars %>%
-  group_by(site) %>%
-  summarise(
-    PC1 = mean(PC1),
-    PC2 = mean(PC2),
-    hf = mean(hf)
-  )
-
-obs_covars <- covars %>%
-  dplyr::select(location, site, baited) %>%
-  pivot_wider(
-    names_from = location,
-    values_from = baited
-  )
-
-site_covars <-site_covars[match(rownames(y_mat),
-                              obs_covars$site)]
-
-
-
-occasion_counts <- apply(!is.na(y_mat), 1, sum)
-
-
-which(is.na(occasion_counts))
-
-expand_covariate <- function(cov_vector, occasion_counts) {
-  maxK <- max(occasion_counts)
-  out <- matrix(NA, nrow = length(cov_vector), ncol = maxK)
-  
-  for (i in seq_along(cov_vector)) {
-    K <- occasion_counts[i]
-    if (K > 0) {
-      out[i, 1:K] <- cov_vector[i]
-    }
-  }
-  
-  out
-}
-
-baited_mat <- expand_covariate(covars$baited, occasion_counts)
-
-obs_covars <- obs_covars %>% dplyr::select(-site)
-```
-
 #Visualizing overlap
 ```{r}
 count_list <- list(
@@ -230,6 +365,7 @@ ggplot(site_counts, aes(x = site, y = detections)) +
     y = "Total Detections"
   )
 ```
+
 ```{r}
 presence_list <- lapply(count_list, function(mat) {
   as.numeric(rowSums(mat, na.rm = TRUE) > 0)
@@ -516,6 +652,7 @@ coyote_nmix_stan
 plot_effects(coyote_nmix_stan, submodel = "state")
 plot_effects(coyote_nmix_stan, submodel = "det")
 
+
 traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
 plot_residuals(coyote_nmix_stan, submodel = "state", covariate = "hf")
 
@@ -574,91 +711,147 @@ ggplot(effects_summary,
 ```
 
 ```{r}
-pc1data_lohf <- data.frame(
-  PC1 = seq(min(site_covars$PC1, na.rm = TRUE),
-           max(site_covars$PC1, na.rm = TRUE),
-           length.out = 1000),
-  PC2 = mean(site_covars$PC2, na.rm = TRUE),  # fix other covariates
-  hf = quantile(site_covars$hf, 0.25, na.rm = TRUE)
-)
+###Predict interaction plot function
+plot_interaction_ubms <- function(model,
+                                  focal,
+                                  moderator,
+                                  species = NULL,
+                                  submodel = "state",
+                                  data,
+                                  mod_probs = c(0.25, 0.75),
+                                  n = 1000,
+                                  ylab = NULL,
+                                  xlab = NULL,
+                                  title = NULL,
+                                  col_low = "darkgreen",
+                                  col_high = "darkorange3") {
+  
+  # 1. Extract moderator quantiles
+  mod_vals <- quantile(data[[moderator]], probs = mod_probs, na.rm = TRUE)
+  
+  # 2. Build prediction grids
+  make_grid <- function(mod_value) {
+    grid <- data.frame(
+      focal = seq(min(data[[focal]], na.rm = TRUE),
+                  max(data[[focal]], na.rm = TRUE),
+                  length.out = n)
+    )
+    names(grid)[1] <- focal
+    
+    # Add moderator
+    grid[[moderator]] <- mod_value
+    
+    # Fix all other covariates at their means
+    other_covs <- setdiff(names(data), c(focal, moderator))
+    for (v in other_covs) {
+      grid[[v]] <- mean(data[[v]], na.rm = TRUE)
+    }
+    grid
+  }
+  
+  grid_low <- make_grid(mod_vals[1])
+  grid_high <- make_grid(mod_vals[2])
+  
+  # 3. Predict
+  pred_low <- ubms::predict(model,
+                            submodel = submodel,
+                            species = species,
+                            newdata = grid_low)
+  
+  pred_high <- ubms::predict(model,
+                             submodel = submodel,
+                             species = species,
+                             newdata = grid_high)
+  
+  # 4. Combine into a plotting dataframe
+  df <- data.frame(
+    cov = grid_low[[focal]],
+    pred_lo = pred_low$Predicted,
+    lower_lo = pred_low$`2.5%`,
+    upper_lo = pred_low$`97.5%`,
+    pred_hi = pred_high$Predicted,
+    lower_hi = pred_high$`2.5%`,
+    upper_hi = pred_high$`97.5%`
+  )
+  
+  # 5. Labels
+  if (is.null(ylab)) ylab <- paste("Predicted", species)
+  if (is.null(xlab)) xlab <- focal
+  if (is.null(title)) title <- paste("Effect of", focal, "x", moderator)
+  
+  # 6. Plot
+  library(ggplot2)
+  ggplot(df, aes(x = cov)) +
+    geom_ribbon(aes(ymin = lower_lo, ymax = upper_lo),
+                fill = col_low, alpha = 0.2) +
+    geom_line(aes(y = pred_lo), color = col_low, linewidth = 1) +
+    geom_ribbon(aes(ymin = lower_hi, ymax = upper_hi),
+                fill = col_high, alpha = 0.2) +
+    geom_line(aes(y = pred_hi), color = col_high, linewidth = 1) +
+    labs(y = ylab, x = xlab, title = title) +
+    theme_classic()
+}
+```
 
-pc1data_hihf <- data.frame(
-  PC1 = seq(min(site_covars$PC1, na.rm = TRUE),
-           max(site_covars$PC1, na.rm = TRUE),
-           length.out = 1000),
-  PC2 = mean(site_covars$PC2, na.rm = TRUE),  # fix other covariates
-  hf = quantile(site_covars$hf, 0.75, na.rm = TRUE)
-)
-
-pred_coyote_pc1_lohf <- ubms::predict(
-  coyote_nmix_stan,
-  submodel = "state",
+```{r}
+coyote_pc1_plot <- plot_interaction_ubms(
+  model = coyote_nmix_stan,
+  focal = "PC1",
+  moderator = "hf",
   species = "coyote",
-  newdata = pc1data_lohf
+  data = site_covars,
+  ylab = "Coyote abundance",
+  xlab = "Climate PC1",
+  title = "Coyote abundance vs PC1 at low/high HF"
 )
 
-pred_coyote_pc1_hihf <- ubms::predict(
-  coyote_nmix_stan,
-  submodel = "state",
+coyote_pc1_plot
+```
+
+```{r}
+coyote_pc2_plot <- plot_interaction_ubms(
+  model = coyote_nmix_stan,
+  focal = "PC2",
+  moderator = "hf",
   species = "coyote",
-  newdata = pc1data_hihf
+  data = site_covars,
+  ylab = "Coyote abundance",
+  xlab = "Climate PC2",
+  title = "Coyote abundance vs PC2 at low/high HF"
 )
 
-df_pc1_coyote <- data.frame(
-  cov = pc1data_lohf$PC1,
-  pred_lo = pred_coyote_pc1_lohf$Predicted,
-  lower_lo = pred_coyote_pc1_lohf$`2.5%`,
-  upper_lo = pred_coyote_pc1_lohf$`97.5%`,
-  pred_hi = pred_coyote_pc1_hihf$Predicted,
-  lower_hi = pred_coyote_pc1_hihf$`2.5%`,
-  upper_hi = pred_coyote_pc1_hihf$`97.5%`
-)
-
-hf_labels <-  c(pred_lo = "darkgreen", pred_hi = "darkorange3")
-
-coyote_pc1 <- ggplot(df_pc1_coyote, aes(x = cov)) +
-  geom_ribbon(aes(ymin = lower_lo, ymax = upper_lo), fill = "darkgreen", alpha = 0.2) +
-  geom_line(aes(y = pred_lo), color = "darkgreen", linewidth = 1) +
-  geom_ribbon(aes(ymin = lower_hi, ymax = upper_hi), fill = "darkorange3", alpha = 0.2) +
-  geom_line(aes(y = pred_hi), color = "darkorange3", linewidth= 1) +
-  scale_color_manual(values = hf_labels) +
-  labs(y = "Coyote abundance",
-       x = "Climate PC1",
-       title = "Coyote abundance",
-       colors = "Human footprint")+
-  theme_classic()
-
-coyote_pc1
+coyote_pc2_plot
 ```
 
 ```{r}
 ##Red Fox
-umf_coyote <- unmarkedFramePCount(
-  y = y_mat,
+umf_redfox <- unmarkedFramePCount(
+  y = redfox_y,
   siteCovs = site_covars,
-  obsCovs = list(bait = bait_mat, camera = cam_mat)
+  obsCovs = list(bait = redfox_bait, camera = redfox_camid)
 )
 
-coyote_nmix_stan <- stan_pcount(formula =  ~ bait
+redfox_nmix_stan <- stan_pcount(formula =  ~ bait
                                 ~ PC1 * hf + PC2 * hf,
-                     data = umf_coyote,
+                     data = umf_redfox,
                      chains = 3,
                      iter = 500,
                      cores = 3)
 
-coyote_nmix_stan
-plot_effects(coyote_nmix_stan, submodel = "state")
-plot_effects(coyote_nmix_stan, submodel = "det")
+redfox_nmix_stan
+plot_effects(redfox_nmix_stan, submodel = "state")
+plot_effects(redfox_nmix_stan, submodel = "det")
 
-traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
-plot_residuals(coyote_nmix_stan, submodel = "state", covariate = "hf")
+traceplot(redfox_nmix_stan, pars=c("beta_state", "beta_det"))
+plot_residuals(redfox_nmix_stan, submodel = "state", covariate = "hf")
 
-plot_posteriors(coyote_nmix_stan)
+plot_posteriors(redfox_nmix_stan)
 
-coyote_gof<-gof(coyote_nmix_stan, draws=100)
-coyote_gof
-plot(coyote_gof)
+redfox_gof<-gof(redfox_nmix_stan, draws=100)
+redfox_gof
+plot(redfox_gof)
 ```
+
 #Custom N-mixture in Stan
 ```{stan}
 data {
@@ -804,7 +997,7 @@ site_covs <- covars %>%
     hf  = first(hf_site),
     veg = first(veg_site)
   ) %>% ungroup()
-X <- as.matrix(site_covs %>% select(PC1, PC2, hf, veg))
+X <- as.matrix(site_covs %>% dplyr::select(PC1, PC2, hf, veg))
 
 K <- ncol(X)
 
