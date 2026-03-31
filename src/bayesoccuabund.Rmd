@@ -800,7 +800,7 @@ coyote_pc1_plot <- plot_interaction_ubms(
   moderator = "hf",
   species = "coyote",
   data = site_covars,
-  ylab = "Coyote abundance",
+  ylab = "Abundance",
   xlab = "Climate PC1",
   title = "Coyote abundance vs PC1 at low/high HF"
 )
@@ -815,7 +815,7 @@ coyote_pc2_plot <- plot_interaction_ubms(
   moderator = "hf",
   species = "coyote",
   data = site_covars,
-  ylab = "Coyote abundance",
+  ylab = "Abundance",
   xlab = "Climate PC2",
   title = "Coyote abundance vs PC2 at low/high HF"
 )
@@ -823,6 +823,7 @@ coyote_pc2_plot <- plot_interaction_ubms(
 coyote_pc2_plot
 ```
 
+##Red Fox
 ```{r}
 ##Red Fox
 umf_redfox <- unmarkedFramePCount(
@@ -850,6 +851,215 @@ plot_posteriors(redfox_nmix_stan)
 redfox_gof<-gof(redfox_nmix_stan, draws=100)
 redfox_gof
 plot(redfox_gof)
+```
+
+```{r}
+redfox_pc1_plot <- plot_interaction_ubms(
+  model = redfox_nmix_stan,
+  focal = "PC1",
+  moderator = "hf",
+  species = "red fox",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "Red Fox abundance vs PC1 at low/high HF"
+)
+
+redfox_pc1_plot
+```
+
+```{r}
+redfox_pc2_plot <- plot_interaction_ubms(
+  model = redfox_nmix_stan,
+  focal = "PC2",
+  moderator = "hf",
+  species = "red fox",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC2",
+  title = "Red Fox abundance vs PC2 at low/high HF"
+)
+
+redfox_pc2_plot
+```
+
+#Lynx
+```{r}
+##Lynx
+umf_lynx <- unmarkedFramePCount(
+  y = lynx_y,
+  siteCovs = site_covars,
+  obsCovs = list(bait = lynx_bait, camera = lynx_camid)
+)
+
+lynx_nmix_stan <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
+                     data = umf_lynx,
+                     chains = 3,
+                     iter = 500,
+                     cores = 3)
+
+lynx_nmix_stan
+plot_effects(lynx_nmix_stan, submodel = "state")
+plot_effects(lynx_nmix_stan, submodel = "det")
+
+traceplot(lynx_nmix_stan, pars=c("beta_state", "beta_det"))
+plot_residuals(lynx_nmix_stan, submodel = "state", covariate = "hf")
+
+plot_posteriors(lynx_nmix_stan)
+
+lynx_gof<-gof(lynx_nmix_stan, draws=100)
+lynx_gof
+plot(lynx_gof)
+```
+
+```{r}
+lynx_pc1_plot <- plot_interaction_ubms(
+  model = lynx_nmix_stan,
+  focal = "PC1",
+  moderator = "hf",
+  species = "lynx",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "Lynx abundance vs PC1 at low/high HF"
+)
+
+lynx_pc1_plot
+```
+
+```{r}
+lynx_pc2_plot <- plot_interaction_ubms(
+  model = lynx_nmix_stan,
+  focal = "PC2",
+  moderator = "hf",
+  species = "lynx",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC2",
+  title = "Lynx abundance vs PC2 at low/high HF"
+)
+
+lynx_pc2_plot
+```
+
+##Marten
+```{r}
+##marten
+umf_marten <- unmarkedFramePCount(
+  y = marten_y,
+  siteCovs = site_covars,
+  obsCovs = list(bait = marten_bait, camera = marten_camid)
+)
+
+marten_nmix_stan <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
+                     data = umf_marten,
+                     chains = 3,
+                     iter = 500,
+                     cores = 3)
+
+marten_nmix_stan
+plot_effects(marten_nmix_stan, submodel = "state")
+plot_effects(marten_nmix_stan, submodel = "det")
+
+traceplot(marten_nmix_stan, pars=c("beta_state", "beta_det"))
+plot_residuals(marten_nmix_stan, submodel = "state", covariate = "hf")
+
+plot_posteriors(marten_nmix_stan)
+
+marten_gof<-gof(marten_nmix_stan, draws=100)
+marten_gof
+plot(marten_gof)
+```
+
+```{r}
+marten_pc1_plot <- plot_interaction_ubms(
+  model = marten_nmix_stan,
+  focal = "PC1",
+  moderator = "hf",
+  species = "marten",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "marten abundance vs PC1 at low/high HF"
+)
+
+marten_pc1_plot
+```
+
+```{r}
+marten_pc2_plot <- plot_interaction_ubms(
+  model = marten_nmix_stan,
+  focal = "PC2",
+  moderator = "hf",
+  species = "marten",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC2",
+  title = "marten abundance vs PC2 at low/high HF"
+)
+
+marten_pc2_plot
+```
+##Fisher
+```{r}
+##Fisher
+umf_fisher <- unmarkedFramePCount(
+  y = fisher_y,
+  siteCovs = site_covars,
+  obsCovs = list(bait = fisher_bait, camera = fisher_camid)
+)
+
+fisher_nmix_stan <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
+                     data = umf_fisher,
+                     chains = 3,
+                     iter = 500,
+                     cores = 3)
+
+fisher_nmix_stan
+plot_effects(fisher_nmix_stan, submodel = "state")
+plot_effects(fisher_nmix_stan, submodel = "det")
+
+traceplot(fisher_nmix_stan, pars=c("beta_state", "beta_det"))
+plot_residuals(fisher_nmix_stan, submodel = "state", covariate = "hf")
+
+plot_posteriors(fisher_nmix_stan)
+
+fisher_gof<-gof(fisher_nmix_stan, draws=100)
+fisher_gof
+plot(fisher_gof)
+```
+
+```{r}
+fisher_pc1_plot <- plot_interaction_ubms(
+  model = fisher_nmix_stan,
+  focal = "PC1",
+  moderator = "hf",
+  species = "fisher",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "fisher abundance vs PC1 at low/high HF"
+)
+
+fisher_pc1_plot
+```
+
+```{r}
+fisher_pc2_plot <- plot_interaction_ubms(
+  model = fisher_nmix_stan,
+  focal = "PC2",
+  moderator = "hf",
+  species = "fisher",
+  data = site_covars,
+  ylab = "Abundance",
+  xlab = "Climate PC2",
+  title = "fisher abundance vs PC2 at low/high HF"
+)
+
+fisher_pc2_plot
 ```
 
 #Custom N-mixture in Stan

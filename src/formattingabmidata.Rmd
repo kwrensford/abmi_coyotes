@@ -157,7 +157,35 @@ ggplot(study_intervals, aes(x = delta_time)) +
   )
 ```
 
-##Latitudinal Partitioning
+```{r}
+#Set independence threshold to 5 minutes
+threshold <- 5
+
+independent_detections <- study_intervals %>%
+  arrange(species_common_name, location, image_date_time) %>%
+  group_by(species_common_name, location) %>%
+  mutate(
+    independent = if_else(
+      is.na(delta_time) | delta_time > threshold,
+      TRUE,
+      FALSE
+    )
+  ) %>%
+  ungroup()
+
+independent_events <- independent_detections %>%
+  filter(independent)
+
+independent_events %>%
+  group_by(species_common_name) %>%
+  summarize(
+    n = n()
+  )
+
+study_main_reports <- independent_events
+```
+
+##Latitudinal and Natural Region Partitioning
 ```{r}
 ##Visualize detections by latitude for each species
 study_main_reports %>%
@@ -212,35 +240,6 @@ study_main_reports <- study_main_reports %>%
   )
 ```
 
-```{r}
-#Set independence threshold to 5 minutes
-threshold <- 5
-
-independent_detections <- study_intervals %>%
-  arrange(species_common_name, location, image_date_time) %>%
-  group_by(species_common_name, location) %>%
-  mutate(
-    independent = if_else(
-      is.na(delta_time) | delta_time > threshold,
-      TRUE,
-      FALSE
-    )
-  ) %>%
-  ungroup()
-
-independent_events <- independent_detections %>%
-  filter(independent)
-
-independent_events %>%
-  group_by(species_common_name) %>%
-  summarize(
-    n = n()
-  )
-
-study_main_reports <- independent_events
-```
-
-##Partitioning multi-species data for natural regions only where all four species are detected
 
 ```{r}
 #Plotting camera locations by natural region
@@ -730,7 +729,7 @@ pc_plot <- autoplot(pca_res, data = climate_sites, color = "Latitude",
          loadings = TRUE, loadings.color = "black", 
          loadings.label = FALSE)+
   geom_point(aes(color = Latitude), size = 3) +
-  scale_color_gradient(low = "gold", high = "purple")+
+  scale_color_viridis_c(option = "plasma", direction = -1)+
   labs(x = "PC1 - Overall Climate",
        y = "PC2 - Aridity")+
   theme_classic() +
@@ -983,8 +982,6 @@ plot(coyote_covars$hf, coyote_covars$coyote_counts)
 ```
 
 ```{r}
-library(ggplot2)
-
 # assuming your long dataframe is called `long_df` 
 site_counts_wide <- site_counts %>%
   pivot_wider(
