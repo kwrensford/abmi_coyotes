@@ -79,92 +79,6 @@ total_operation_days<- vroom::vroom("data/Total Days of Operations ABMI EH 2014-
 camera_operation_dates <- vroom::vroom("data/Operation Dates ABmi EH 2014-2018.csv")
 ```
 
-##Latitudinal Partitioning
-```{r}
-##Visualize detections by latitude for each species
-study_main_reports %>%
-  ggplot(aes(x = latitude)) +
-  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
-  facet_wrap(~ species_common_name, ncol = 2, scales = "free_y") +
-  labs(
-    title = "Latitude Distribution of Camera Trap Detections",
-    x = "Latitude",
-    y = "Frequency"
-  ) +
-  theme_minimal()
-
-
-##Set latitudinal thresholds
-lo_lat <- 54
-hi_lat <- 57
-  
-##Create latitude threshold covariate for each observation
-
-study_main_reports <- study_main_reports %>%
-  mutate(
-    latitude_region = case_when(
-      latitude > hi_lat ~ "High latitude",
-      latitude < hi_lat & latitude > lo_lat~ "Mid latitude",
-      latitude <lo_lat ~ "Low latitude"
-    )
-  )
-```
-
-##Independent detections
-```{r}
-#Generate delta time (intervals between detection)
-study_intervals <- study_main_reports %>%
-  arrange(species_common_name, location, image_date_time) %>%
-  group_by(species_common_name, location) %>%
-  mutate(delta_time = as.numeric(difftime(image_date_time, lag(image_date_time), units = "mins"))) %>%
-  ungroup()
-
-#Visualize on a histogram
-ggplot(study_intervals, aes(x = delta_time)) +
-  geom_histogram() +
-  facet_wrap(~ species_common_name)
-
-
-ggplot(study_intervals, aes(x = delta_time)) +
-  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
-  facet_wrap(~ species_common_name, scales = "free_y") +
-  coord_cartesian(xlim = c(0, 120))+
-  theme_minimal() +
-  labs(
-    title = "Detection Interval Histograms (0–120 minutes)",
-    x = "Minutes since previous detection",
-    y = "Frequency"
-  )
-```
-
-```{r}
-#Set independence threshold to 5 minutes
-threshold <- 5
-
-independent_detections <- study_intervals %>%
-  arrange(species_common_name, location, image_date_time) %>%
-  group_by(species_common_name, location) %>%
-  mutate(
-    independent = if_else(
-      is.na(delta_time) | delta_time > threshold,
-      TRUE,
-      FALSE
-    )
-  ) %>%
-  ungroup()
-
-independent_events <- independent_detections %>%
-  filter(independent)
-
-independent_events %>%
-  group_by(species_common_name) %>%
-  summarize(
-    n = n()
-  )
-
-study_main_reports <- independent_events
-```
-
 ##Covariate data
 
 ```{r}
@@ -213,6 +127,117 @@ covariates_fixed <- check_coords %>%
     Longitude = ifelse(lon_mismatch, longitude_cam, Long)
   ) %>%
   dplyr::select(-latitude_cam, -longitude_cam, -lat_mismatch, -lon_mismatch, -Lat, -Long)
+```
+
+
+##Independent detections
+```{r}
+#Generate delta time (intervals between detection)
+study_intervals <- study_main_reports %>%
+  arrange(species_common_name, location, image_date_time) %>%
+  group_by(species_common_name, location) %>%
+  mutate(delta_time = as.numeric(difftime(image_date_time, lag(image_date_time), units = "mins"))) %>%
+  ungroup()
+
+#Visualize on a histogram
+ggplot(study_intervals, aes(x = delta_time)) +
+  geom_histogram() +
+  facet_wrap(~ species_common_name)
+
+
+ggplot(study_intervals, aes(x = delta_time)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  facet_wrap(~ species_common_name, scales = "free_y") +
+  coord_cartesian(xlim = c(0, 120))+
+  theme_minimal() +
+  labs(
+    title = "Detection Interval Histograms (0–120 minutes)",
+    x = "Minutes since previous detection",
+    y = "Frequency"
+  )
+```
+
+##Latitudinal Partitioning
+```{r}
+##Visualize detections by latitude for each species
+study_main_reports %>%
+  ggplot(aes(x = latitude)) +
+  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
+  facet_wrap(~ species_common_name, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Latitude Distribution of Camera Trap Detections",
+    x = "Latitude",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+##Visualize sites per Latitude
+covariates_NR <- covariates_fixed %>%
+  arrange(NR, NSR) %>%
+  mutate(NSR = factor(NSR, levels = unique(NSR)))
+
+ggplot(covariates_NR, aes(x = Latitude, fill = NSR)) +
+  geom_histogram(position = "stack", bins = 30, color = "black") +
+  scale_fill_viridis_d(option = "turbo") +
+  labs(
+    x = "Latitude",
+    y = "Number of Camera Sites",
+    fill = "Subregion",
+    title = "Stacked Histogram of Camera Sites by Latitude"
+  ) +
+  theme_minimal()
+
+NR_table <- covariates_fixed %>%
+  distinct(NR, NSR) %>%
+  group_by(NR) %>%
+  summarise(NSR = paste(sort(unique(NSR)), collapse = ", ")) %>%
+  arrange(NR)
+
+knitr::kable(NR_table, format = "markdown")
+
+
+##Set latitudinal thresholds
+lo_lat <- 54
+hi_lat <- 57
+  
+##Create latitude threshold covariate for each observation
+
+study_main_reports <- study_main_reports %>%
+  mutate(
+    latitude_region = case_when(
+      latitude > hi_lat ~ "High latitude",
+      latitude < hi_lat & latitude > lo_lat~ "Mid latitude",
+      latitude <lo_lat ~ "Low latitude"
+    )
+  )
+```
+
+```{r}
+#Set independence threshold to 5 minutes
+threshold <- 5
+
+independent_detections <- study_intervals %>%
+  arrange(species_common_name, location, image_date_time) %>%
+  group_by(species_common_name, location) %>%
+  mutate(
+    independent = if_else(
+      is.na(delta_time) | delta_time > threshold,
+      TRUE,
+      FALSE
+    )
+  ) %>%
+  ungroup()
+
+independent_events <- independent_detections %>%
+  filter(independent)
+
+independent_events %>%
+  group_by(species_common_name) %>%
+  summarize(
+    n = n()
+  )
+
+study_main_reports <- independent_events
 ```
 
 ##Partitioning multi-species data for natural regions only where all four species are detected
