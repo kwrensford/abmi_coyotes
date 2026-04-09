@@ -47,7 +47,11 @@ covars_sf <- st_as_sf(
 ```
 
 ```{r}
-bbox <- st_bbox(covars_sf)
+sf::st_is_valid(covars_sf)
+nrow(covars_sf)
+sf::st_geometry(covars_sf)
+
+bbox <- alberta
 
 elev <- get_elev_raster(locations = covars_sf, z = 10, clip = "bbox")
 elev <- rast(elev)
@@ -59,12 +63,19 @@ hillshade_gray <- terra::app(hillshade, fun = mean)
 
 map_pc1 <- 
   tm_shape(hillshade_gray) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.5) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.5, legend.show = FALSE ) + 
   tm_shape(elev) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.4) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.4, legend.show = FALSE ) + 
   tm_shape(covars_sf) + 
-  tm_dots(col = "PC1", palette = "viridis", size = 0.5) +
-  tm_layout(title = "Climate PC1 (Overall Climate)")
+  tm_dots(col = "PC1", palette = "viridis", size = 0.5, style = "cont") +
+  tm_layout(
+  legend.outside = TRUE,
+  legend.outside.position = "right",
+  legend.frame = FALSE,
+  legend.text.size = 0.8,
+  legend.title.size = 1
+)
+
 
 map_pc2 <- 
   tm_shape(hillshade_gray) + 
@@ -72,17 +83,29 @@ map_pc2 <-
   tm_shape(elev) + 
   tm_raster(palette = gray.colors(100), alpha = 0.4) + 
   tm_shape(covars_sf) + 
-  tm_dots(col = "PC2", palette = "viridis", size = 0.5) +
-  tm_layout(title = "Climate PC2 (Aridity)")
+  tm_dots(col = "PC2", palette = "viridis", size = 0.5, style = "cont") +
+  tm_layout(
+  legend.outside = TRUE,
+  legend.outside.position = "right",
+  legend.frame = FALSE,
+  legend.text.size = 0.8,
+  legend.title.size = 1
+)
 
 map_hf <- 
   tm_shape(hillshade_gray) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.5) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.5, fill.legend = tm_legend_hide()) +
   tm_shape(elev) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.4) + 
+  tm_raster(palette = gray.colors(100), alpha = 0.4, fill.legend = tm_legend_hide()) +
   tm_shape(covars_sf) + 
-  tm_dots(col = "hf", palette = "viridis", size = 0.5) +
-  tm_layout(title = "Human Footprint")
+  tm_dots(col = "hf", palette = "viridis", size = 0.5, style = "cont") #+
+#  tm_layout(
+#  legend.outside = TRUE,
+#  legend.outside.position = "right",
+#  legend.frame = FALSE,
+#  legend.text.size = 0.8,
+#  legend.title.size = 1
+)
 
 tmap_arrange(map_pc1, map_pc2, map_hf, ncol = 3)
 ```
