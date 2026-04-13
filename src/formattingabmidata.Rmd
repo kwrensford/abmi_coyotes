@@ -76,6 +76,15 @@ study_main_reports <- study_main_reports %>%
 #Camera effort data
 total_operation_days<- vroom::vroom("data/Total Days of Operations ABMI EH 2014-2020.csv")
 
+study_operation_days <- total_operation_days %>%
+  filter(!project %in% c(
+    "ABMI Ecosystem Health 2014",
+    "ABMI Ecosystem Health 2014",
+    "ABMI Ecosystem Health 2020",
+    "ABMI Ecosystem Health 2021",
+    "ABMI Ecosystem Health 2022"
+    ))
+
 camera_operation_dates <- vroom::vroom("data/Operation Dates ABmi EH 2014-2018.csv")
 ```
 
@@ -310,6 +319,19 @@ ggplot(detections_plot,
 
 ```
 
+```{r}
+#Group Natural SubRegions for Analyses
+
+summary_df <- study_main_reports %>%
+  filter(!is.na(NSR), !is.na(species_common_name)) %>%
+  count(NSR, species_common_name, name = "total_detections")
+
+ggplot(summary_df, aes(x = NSR, y = total_detections, fill = species_common_name)) +
+  geom_col() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 ##Create detection matrices for each species
 
 ```{r}
@@ -328,6 +350,8 @@ camera_operation_dates_v2<-study_image_reports %>%
     start_date_time = min(image_date_time),
     end_date_time = max(image_date_time)
   )
+
+
 ##Build a Camera operation matrix
 camera_operation_dates_filtered<-camera_operation_dates_v2%>%
   filter(!is.na(start_date_time))
@@ -876,6 +900,14 @@ covars <- covars %>%
     remove = FALSE # keep original column if helpful
   )
 
+study_main_reports <- study_main_reports %>%
+  separate(
+    col = location,
+    into = c("site", "cam_orientation"),
+    sep = "-",     # split at the hyphen
+    remove = FALSE # keep original column if helpful
+  )
+
 #Create column for baited and non baited
 covars <- covars %>%
   mutate(
@@ -1011,6 +1043,143 @@ plots <- lapply(species_list, function(sp) {
 plots
 ```
 
+##Binning based on latitude, hf, etc.
+```{r}
+site_detections <- study_main_reports %>%
+  count(location, name = "detections")
+
+df <- covars %>%
+  left_join(site_detections, by = "location") %>%
+  mutate(detections = ifelse(is.na(detections), 0, detections))
+
+vars <- c("Latitude", "PC1", "PC2", "hf", "roads", "rail", "built",
+          "oil_gas", "forestry", "mines", "crop", "pasture",
+          "linear", "industrial", "agriculture")
+
+cov_scaled <- covars %>%
+  select(all_of(vars)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  mutate(across(everything(), scale))
+
+pca <- prcomp(cov_scaled, scale = FALSE)
+summary(pca)
+pca_scores <- as.data.frame(pca$x[,1:6])
+
+diss <- dist(pca_scores, method = "euclidean")
+
+#Detection Balance
+
+library(WeightedCluster)
+
+weighted_kmeans <- function(data, weights, k) {
+  wcKMedoids(data, k = k, weights = weights)
+}
+
+detection_balance <- function(cluster_assignments, detections) {
+  totals <- tapply(detections, cluster_assignments, sum)
+  sd(totals) / mean(totals)
+}
+
+covariate_balance <- function(cluster_assignments, cov_scaled) {
+  by_cluster <- split(cov_scaled, cluster_assignments)
+  mean(sapply(by_cluster, function(x) mean(apply(x, 2, var))))
+}
+
+results <- data.frame()
+
+for (k in 2:20) {
+  model <- weighted_kmeans(diss, k = k, weights = df$detections)
+  clusters <- model$clustering
+  
+  det_cv <- detection_balance(clusters, df$detections)
+  cov_var <- covariate_balance(clusters, cov_scaled)
+  
+  results <- rbind(results, data.frame(
+    k = k,
+    detection_cv = det_cv,
+    covariate_variance = cov_var
+  ))
+}
+
+print(results)
+http://127.0.0.1:39924/graphics/plot_zoom_png?width=827&height=863
+k_optimal <- results$k[which.min(results$detection_cv)]
+
+final_model <- wcKMedoids(diss, k = k_optimal, weights = df$detections)
+clusters <- final_model$clustering
+cluster_ids <-match(clusters, unique(clusters))
+df$bin <- cluster_ids
+
+ggplot(data.frame(pca_scores, bin = factor(df$bin)),
+       aes(PC1, PC2, color = bin)) +
+  geom_point(alpha = 0.6) +
+  stat_ellipse(type = "norm", linewidth = 1) +
+  theme_minimal() +
+  labs(title = "Cluster Ellipses in PCA Space")
+
+
+df_long <- df %>%
+  select(bin = bin, Latitude, PC1, PC2, hf, roads, rail, built, oil_gas, forestry, mines, crop, pasture, linear, industrial, agriculture) %>%
+  pivot_longer(-bin, names_to = "variable", values_to = "value")
+
+ggplot(df_long, aes(x = factor(bin), y = value, fill = factor(bin))) +
+  geom_violin(alpha = 0.6) +
+  geom_boxplot(width = 0.2, outlier.size = 0.5) +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Distribution of Original Variables by Bin",
+       x = "Bin",
+       y = "Value",
+       fill = "Bin")
+
+det_balance <- df %>%
+  group_by(bin) %>%
+  summarise(
+    n_sites = n(),
+    total_detections = sum(detections),
+    mean_detections = mean(detections),
+    median_detections = median(detections)
+  )
+
+
+ggplot(det_balance, aes(x = factor(bin), y = total_detections, fill = factor(bin))) +
+  geom_col() +
+  theme_minimal() +
+  labs(
+    title = "Total Detections per Bin",
+    x = "Bin",
+    y = "Total Detections",
+    fill = "Bin"
+  )
+
+library(sf)
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# Get all Canadian provinces/territories
+canada <- ne_states(country = "Canada", returnclass = "sf")
+
+# Filter Alberta
+alberta <- canada[canada$name == "Alberta", ]
+
+# Plot
+ggplot() +
+  geom_sf(data = alberta, fill = "grey95", color = "black") +
+  geom_point(
+    data = df,
+    aes(x = longitude, y = latitude, color = factor(bin_simple)),
+    size = 2, alpha = 0.8
+  ) +
+  coord_sf() +
+  theme_minimal() +
+  labs(
+    title = "Bins Mapped on Alberta Basemap",
+    x = "Longitude",
+    y = "Latitude",
+    color = "Bin"
+  )
+```
 
 #Write CSV files
 
