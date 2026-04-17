@@ -41,6 +41,7 @@ library(purrr)
 library(sjPlot)
 library(sjmisc)
 library(ggeffects)
+library(cmdstanr)
 
 ```
 
@@ -927,7 +928,8 @@ marten_pc2_plot <- plot_interaction_ubms(
 
 marten_pc2_plot
 ```
-##Fisher
+
+##Fisher NMix Models
 ```{r}
 ##Fisher
 umf_fisher <- unmarkedFramePCount(
@@ -988,191 +990,137 @@ fisher_pc2_plot
 ```
 
 #Custom N-mixture in Stan
-```{stan}
-data {
-  int<lower=1> J;                 // number of sites
-  int<lower=1> I;                 // number of cameras (S * cams_per_site)
-  int<lower=1> K;                 // number of sampling occasions (weeks)
-  int<lower=1> S;                 // number of site-level abundance covariates (e.g., 4)
-  matrix[J, S] X;                 // site covariate matrix (row = site)
-  int<lower=1, upper=
-```
+```{r}
+#Format data
+abund <- as.matrix(coyotecounts)   # cameras × occasions
+K      <- ncol(abund)              # number of occasions
 
+site_id   <- covars$site           # site per camera
+sites     <- sort(unique(site_id))
+I         <- length(sites)         # number of sites
 
-```{stan}
-// file: nmix_site_cam_orientation.stan
-data {
-  int<lower=1> J;                 // number of sites
-  int<lower=1> I;                 // number of cameras (S * cams_per_site)
-  int<lower=1> K;                 // number of sampling occasions (weeks)
-  int<lower=1> S;                 // number of site-level abundance covariates (e.g., 4)
-  matrix[J, S] X;                 // site covariate matrix (row = site)
-  int<lower=1,upper=S> site_of_cam[C]; // map camera -> site (length C)
-  int<lower=0> y[I, K];           // observed counts per camera x occasion
-  int<lower=0,upper=1> baited[I, K]; // baited covariate per camera x occasion (0/1)
-  int<lower=1> N_orient;          // number of orientation levels (e.g., 4)
-  int<lower=1,upper=N_orient> orient[C]; // camera orientation level per camera (1..4)
-  int<lower=0> Nmax_site[S];     // per-site Nmax to sum over (>= max observed at site)
-}
-parameters {
-  // abundance (site-level)
-  real alpha0;                    // intercept for log(lambda)
-  vector[K] beta;                 // coefficients for site covariates
-  vector[S] eta_site;             // site random intercepts (unscaled)
-  real<lower=0> sigma_site;       // SD for site random effects
+# cameras per site
+J_tab <- table(site_id)
+J     <- as.integer(J_tab[match(sites, names(J_tab))])
+max_J <- max(J)
+max_K <- K
 
-  // detection (camera x occasion)
-  real gamma0;                    // detection intercept (logit scale)
-  real gamma_bait;                // baited effect
-  vector[N_orient] eta_orient;    // orientation random intercepts (unscaled)
-  real<lower=0> sigma_orient;     // SD for orientation random effects
-}
-transformed parameters {
-  vector[S] log_lambda;
-  // site-level linear predictor for abundance
-  log_lambda = alpha0 + X * beta + eta_site * sigma_site;
-  // Note: eta_site is standard normal; we multiply by sigma_site either here or in model.
-}
-model {
-  // Priors
-  alpha0 ~ normal(0, 5);
-  beta ~ normal(0, 2);
-  eta_site ~ normal(0, 1);
-  sigma_site ~ normal(0, 2); // half-normal
+y      <- array(0L, dim = c(I, max_J, max_K))
+use_y  <- array(0L, dim = c(I, max_J, max_K))
+baited_arr <- matrix(0L, nrow = I, ncol = max_J)
 
-  gamma0 ~ normal(0, 5);
-  gamma_bait ~ normal(0, 2);
-  eta_orient ~ normal(0, 1);
-  sigma_orient ~ normal(0, 2);
+clim_pc1 <- numeric(I)
+clim_pc2 <- numeric(I)
+human_fp <- numeric(I)
 
-  // Likelihood: marginalize over latent N for each site
-  for (s in 1:S) {
-    // collect cameras that belong to site s
-    // We'll compute log-likelihood contribution for site s by summing over N = max_obs..Nmax_site[s]
-    int cams_for_s_count = 0;
-    // create temporary arrays for p_ij and y_ij for the cameras in site s
-    // To avoid dynamic arrays in Stan, we'll iterate over cameras and multiply inside loop.
-    // For numerical stability, we'll compute the log marginal likelihood using log_sum_exp.
+for (i in seq_along(sites)) {
+  this_site <- sites[i]
+  cams_i    <- which(site_id == this_site)   # row indices in covars/coyotecounts
+  J_i       <- length(cams_i)
 
-    // Determine minimal N to sum from: the largest count observed at any camera×occ in site s
-    int ymax = 0;
-    for (c in 1:C) if (site_of_cam[c] == s) {
-      for (j in 1:J)
-        if (y[c,j] > ymax) ymax = y[c,j];
-    }
+  # site-level covariates: same for all cameras at this site
+  clim_pc1[i] <- covars$PC1[cams_i[1]]
+  clim_pc2[i] <- covars$PC2[cams_i[1]]
+  human_fp[i] <- covars$hf[cams_i[1]]
 
-    real logpN[Nmax_site[s] - ymax + 1]; // log-probabilities for each candidate N
-    int idx = 1;
-    for (N = ymax; N <= Nmax_site[s]; N++) {
-      // log P(N | lambda_s)
-      real log_pN = poisson_lpmf(N | exp(log_lambda[s]));
+  for (j in seq_len(J_i)) {
+    row_idx <- cams_i[j]
 
-      // add log P(y | N, p) for all cameras in site s and all occasions
-      real log_py_given_N = 0;
-      for (c in 1:C) if (site_of_cam[c] == s) {
-        for (j in 1:J) {
-          // build p for this camera and occasion:
-          real logit_p = gamma0 + gamma_bait * baited[c,j] + eta_orient[orient[c]] * sigma_orient;
-          real p = inv_logit(logit_p);
-          // binomial_lpmf handles y up to N
-          log_py_given_N += binomial_lpmf(y[c,j] | N, p);
-        }
+    # camera-level detection covariate
+    baited_arr[i, j] <- as.integer(covars$baited[row_idx])
+
+    for (k in seq_len(max_K)) {
+      val <- abund[row_idx, k]
+      if (!is.na(val)) {
+        y[i, j, k]     <- as.integer(val)
+        use_y[i, j, k] <- 1L
       }
-      logpN[idx] = log_pN + log_py_given_N;
-      idx += 1;
     }
-    target += log_sum_exp(logpN); // add site marginal log-likelihood
   }
 }
-generated quantities {
-  // posterior predictive draws or derived quantities can be added here
-  // Example: mean abundance per site
-  vector[S] lambda = exp(log_lambda);
-}
+
+
+stan_data <- list(
+  I       = I,
+  J       = J,
+  max_J   = max_J,
+  max_K   = max_K,
+  y       = y,
+  use_y   = use_y,
+  clim_pc1 = clim_pc1,
+  clim_pc2 = clim_pc2,
+  human_fp = human_fp,
+  baited   = baited_arr,
+  K        = 200  # or some upper bound for N
+)
 
 ```
 
 ```{r}
-library(dplyr)
-library(cmdstanr)   # recommended; faster than rstan
-# or library(rstan) if you prefer
-
-# --- assume you have a dataframe 'covars' with one row per camera:
-# columns: location (camera name), location_id (site prefix), cam_orientation (NE/NW/SE/SW),
-# PC1_site, PC2_site, hf_site, veg_site, baited (can be per camera or per camera×occasion)
-# and a counts array or data.frame 'coyotecounts' with dimensions cameras x occasions
-
-# Example: flatten/prepare
-covars <- covars %>%
-  mutate(
-    # camera index
-    cam_idx = row_number(),
-    # orientation index 1..4
-    orient_idx = match(cam_orientation, c("NE","NW","SE","SW"))
-  )
-
-# counts: suppose 'coyotecounts' is a matrix with rows in same order as covars rows
-y_mat <- as.matrix(coyotecounts)  # dim = C x J
-
-C <- nrow(y_mat)
-J <- ncol(y_mat)
-
-# site mapping: extract unique sites (site prefix) and map cameras to site index
-site_names <- unique(covars$location_id)
-S <- length(site_names)
-site_of_cam <- match(covars$location_id, site_names)  # length C, values 1..S
-
-# build site-level covariate matrix X (S x K)
-# ensure covariates are site-level (one row per site)
-site_covs <- covars %>% 
-  group_by(location_id) %>% 
-  summarise(
-    PC1 = first(PC1_site),
-    PC2 = first(PC2_site),
-    hf  = first(hf_site),
-    veg = first(veg_site)
-  ) %>% ungroup()
-X <- as.matrix(site_covs %>% dplyr::select(PC1, PC2, hf, veg))
-
-K <- ncol(X)
-
-# baited should be camera x occasion matrix (0/1)
-# if you have a single baited flag per camera:
-baited_mat <- matrix(as.integer(covars$baited), nrow = C, ncol = J, byrow = FALSE)
-# or if baiting changes by occasion, build accordingly.
-
-# orientation vector per camera (1..4)
-orient <- covars$orient_idx
-
-# Nmax per site: choose max observed + buffer
-Nmax_site <- integer(S)
-for (s in 1:S) {
-  cams <- which(site_of_cam == s)
-  Nmax_site[s] <- max(y_mat[cams, ]) + 60  # buffer of 60; adjust as needed
-}
-
-# Prepare data list for Stan
-stan_data <- list(
-  S = S,
-  C = C,
-  J = J,
-  K = K,
-  X = X,
-  site_of_cam = site_of_cam,
-  y = y_mat,
-  baited = baited_mat,
-  N_orient = 4,
-  orient = orient,
-  Nmax_site = Nmax_site
+mod <- cmdstan_model(
+  "C:/Users/Gaynor Lab/Documents/abmi_coyotes/coyote_nmix.stan"
 )
 
-# Compile & run with cmdstanr
-mod <- cmdstan_model("nmix_site_cam_orientation.stan")
-fit <- mod$sample(data = stan_data,
-                  chains = 4, parallel_chains = 4,
-                  iter_sampling = 1000, iter_warmup = 1000,
-                  max_treedepth = 12, adapt_delta = 0.95)
+str(stan_data, max.level = 1)
 
-print(fit$summary())
+stan_data$J
+
+i <- 1
+j <- 1
+cbind(
+  y      = stan_data$y[i, j, ],
+  use_y  = stan_data$use_y[i, j, ]
+)
+
+head(stan_data$clim_pc1)
+head(stan_data$clim_pc2)
+head(stan_data$human_fp)
+
+stan_data$baited[1, 1:stan_data$J[2]]
+
+stan_data$K
+```
+```{r}
+system.time(
+  fit_test <- mod$sample(
+    data = stan_data,
+    chains = 1,
+    parallel_chains = 1,
+    iter_warmup = 5,
+    iter_sampling = 5,
+    refresh = 1
+  )
+)
+
+```
+
+```{r}
+fit_test <- mod$sample(
+  data = stan_data,
+  chains = 1,
+  parallel_chains = 1,
+  iter_warmup = 200,
+  iter_sampling = 200,
+  adapt_delta = 0.99,
+  max_treedepth = 12,
+  refresh = 20
+)
+
+fit_test$diagnostic_summary()[, c("variable", "rhat", "ess_bulk", "ess_tail", "divergent__", "treedepth__")]
+
+
+```
+
+```{r}
+fit <- mod$sample(
+  data = stan_data,
+  chains = 2,
+  parallel_chains = 2,
+  iter_warmup = 300,
+  iter_sampling = 300,
+  adapt_delta = 0.9,
+  max_treedepth = 12,
+  refresh = 50
+)
 
 ```

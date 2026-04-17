@@ -252,11 +252,11 @@ study_main_reports <- study_main_reports %>%
 
 ```{r}
 #Plotting camera locations by natural region
-ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = NSR)) + 
+ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = NR)) + 
   theme_minimal()+
   geom_point()
 
-ggplot(covariates_fixed, aes(x = NSR, fill = NSR)) + 
+ggplot(covariates_fixed, aes(x = NR, fill = NSR)) + 
   theme_minimal()+
   geom_bar()
 
@@ -302,12 +302,13 @@ detections_summary <- study_main_reports %>%
   ) %>%
   ungroup()
 
+
 ggplot(detections_plot,
-       aes(x = NSR, y = count, fill = subregion_color, color = NR)) +
+       aes(x = NR, y = count, fill = NR, color = NR)) +
   geom_col() +
   facet_wrap(~ species_common_name, scales = "free_y") +
-  scale_color_manual(region_colors)+
-  scale_fill_identity() +
+  scale_color_manual(values = region_colors)+
+  scale_fill_manual(values = region_colors) +
   labs(
     x = "Subregion",
     y = "Detections",
@@ -322,14 +323,71 @@ ggplot(detections_plot,
 ```{r}
 #Group Natural SubRegions for Analyses
 
-summary_df <- study_main_reports %>%
-  filter(!is.na(NSR), !is.na(species_common_name)) %>%
-  count(NSR, species_common_name, name = "total_detections")
+covariates_fixed$region <- with(covariates_fixed, case_when(
+  
+  # Group 1: Canadian Shield + Boreal except Dry Mixedgrass
+  NR == "Canadian Shield" ~ "Shield+Boreal",
+  NR == "Boreal" & NSR != "Dry Mixedwood" ~ "Shield+Boreal",
+  
+  # Group 2: Grassland + Parkland + Dry Mixedgrass
+  NR %in% c("Grassland", "Parkland") ~ "Grassland+Parkland",
+  NSR == "Dry Mixedwood" ~ "Grassland+Parkland",
+  
+  # Group 3: Rocky Mountain + Foothills
+  NR %in% c("Rocky Mountain", "Foothills") ~ "Rocky+Foothills",
+  
+  TRUE ~ "Other"   # safety catch; should not be needed
+))
 
-ggplot(summary_df, aes(x = NSR, y = total_detections, fill = species_common_name)) +
-  geom_col() +
-  theme_bw() +
+
+table(covariates_fixed$region)
+
+table(covariates_fixed$NSR, covariates_fixed$region)
+
+covariates_fixed %>%
+  distinct(region, NR, NSR) %>%
+  arrange(region, NR, NSR) %>%
+  group_by(region, NR) %>%
+  summarise(NSR = paste(NSR, collapse = ", "), .groups = "drop") %>%
+  group_by(region) %>%
+  summarise(
+    summary = paste0(NR, ": ", NSR, collapse = "\n  "),
+    .groups = "drop"
+  ) %>%
+  mutate(summary = paste0(region, "\n  ", summary)) %>%
+  pull(summary) %>%
+  cat(sep = "\n\n")
+
+##Map of Regions
+ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = region)) + 
+  theme_minimal()+
+  geom_point()
+
+
+
+```
+
+```{r}
+#Species per region
+
+det_with_region <- study_main_reports %>%
+  left_join(covariates_fixed %>% select(location, region),
+            by = "location")
+
+det_summary <- det_with_region %>%
+  count(species_common_name, region)
+
+ggplot(det_summary, aes(x = region, y = n, fill = species_common_name)) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  labs(
+    x = "Region",
+    y = "Number of Detections",
+    fill = "Species",
+    title = "Detections per Region for All Focal Species"
+  ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
 ```
 
 ##Create detection matrices for each species
