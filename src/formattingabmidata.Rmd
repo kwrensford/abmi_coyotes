@@ -462,6 +462,80 @@ camera_operation_matrix<-cameraOperation(camera_deployment_problems,
                                          hasProblems = FALSE,
                                          dateFormat = "ymd_HMS"
                                          )
+
+#Function
+
+make_matrices <- function(det_df, camop_df, species, region = NULL,
+                          occasion_length = 7,
+                          day1 = "station",
+                          tz = "America/Edmonton") {
+  
+  # Filter by species
+  df <- det_df %>% filter(species_common_name == species)
+  
+  # Optional region filter (region must be in det_df)
+  if (!is.null(region)) {
+    df <- df %>% filter(year == region)   # or your real region column
+    camop_sub <- camop_df[rownames(camop_df) %in% df$location, ]
+  } else {
+    camop_sub <- camop_df
+  }
+  
+  # Detection history (binary)
+  dh <- detectionHistory(
+    recordTable = df,
+    camOp = camop_sub,
+    stationCol = "location",
+    speciesCol = "species_common_name",
+    recordDateTimeCol = "image_date_time",
+    recordDateTimeFormat = "ymd_HMS",
+    species = species,
+    occasionLength = occasion_length,
+    day1 = day1,
+    datesAsOccasionNames = FALSE,
+    includeEffort = TRUE,
+    scaleEffort = FALSE,
+    timeZone = tz,
+    output = "binary",
+    unmarkedMultFrameInput = TRUE
+  )
+  
+  # Count matrix
+  cm <- detectionHistory(
+    recordTable = df,
+    camOp = camop_sub,
+    stationCol = "location",
+    speciesCol = "species_common_name",
+    recordDateTimeCol = "image_date_time",
+    recordDateTimeFormat = "ymd_HMS",
+    species = species,
+    occasionLength = occasion_length,
+    day1 = day1,
+    datesAsOccasionNames = FALSE,
+    includeEffort = TRUE,
+    scaleEffort = FALSE,
+    timeZone = tz,
+    output = "count",
+    unmarkedMultFrameInput = TRUE
+  )
+  
+  return(list(
+    detection_matrix = dh$detection_history,
+    count_matrix = cm$detection_history
+  ))
+}
+
+coyote <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix,
+  species = "Coyote"
+)
+
+coyote$detection_matrix
+coyote$count_matrix
+
+
+
 ##Camera detection history
 datetime_check<-as.POSIXct(study_main_reports$image_date_time, format = ymd_HMS)
 invalid_entries<-study_main_reports[is.na(datetime_check),]
@@ -763,15 +837,15 @@ identical(rownames(redfoxdetections), covariates_unique$location)
 ##Filter out climate covariates
 
 covariates_climate <- covariates_unique %>%
-  dplyr::select(location, Latitude, Longitude, AHM, PET, FFP, MAP, MAT, MWMT, MCMT)
+  dplyr::select(location, Latitude, Longitude, AHM, PET, FFP, MAP, MAT, MWMT, MCMT, region)
 
 ##Keep location info
 covar_locations <- covariates_climate %>%
-  dplyr::select(location, Latitude, Longitude)
+  dplyr::select(location, Latitude, Longitude, region)
 
 ##Climate variables only
 climate_var <- covariates_climate %>%
-    dplyr::select(-location, -Latitude, -Longitude)
+    dplyr::select(-location, -Latitude, -Longitude, -region)
 
 climate_scaled <- scale(climate_var)
 
@@ -841,14 +915,6 @@ linear_abmi <- linear_abmi %>%
   mutate(abmi_linear = rowSums(.[4:7]))
 ```
 
-##ABMI Vegetation
-```{r}
-veg_abmi <- covariates_unique %>%
-  dplyr::select(location, Latitude, Longitude, TransmissionLine_buf, Pipeline_buf, SeismicLineNarrow_buf, SeismicLineWide_buf)
-
-linear_abmi <- linear_abmi %>%
-  mutate(abmi_linear = rowSums(.[4:7]))
-```
 
 ##Canada Human Footprint index
 
@@ -1037,6 +1103,174 @@ mapview(
   col.regions = viridis(20), # continuous palette
   layer.name = "Human footprint"
 )
+```
+Covariate variation across regions
+```{r}
+
+# Basic theme
+theme_map <- theme_minimal(base_size = 13) +
+  theme(panel.grid = element_blank())
+
+# PC1 map
+ggplot(covars, aes(x = Longitude, y = Latitude, color = PC1)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "plasma") +
+  theme_map +
+  labs(title = "Spatial Variation in Climate PC1",
+       color = "PC1")
+
+# PC2 map
+ggplot(covars, aes(x = Longitude, y = Latitude, color = PC2)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "viridis") +
+  theme_map +
+  labs(title = "Spatial Variation in Climate PC2",
+       color = "PC2")
+
+# Human footprint map
+ggplot(covars, aes(x = Longitude, y = Latitude, color = hf)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "magma") +
+  theme_map +
+  labs(title = "Spatial Variation in Human Footprint",
+       color = "HF")
+
+covars_long <- covars %>%
+  select(Longitude, Latitude, PC1, PC2, hf) %>%
+  pivot_longer(cols = c(PC1, PC2, hf),
+               names_to = "variable",
+               values_to = "value")
+
+ggplot(covars_long, aes(x = Longitude, y = Latitude, color = value)) +
+  geom_point(size = 1.8, alpha = 0.8) +
+  scale_color_viridis_c() +
+  facet_wrap(~ variable, ncol = 1, scales = "free") +
+  theme_map +
+  labs(title = "Spatial Variation in Climate PCs and Human Footprint",
+       color = "Value")
+
+covars_long2 <- covars %>%
+  select(region, PC1, PC2, hf) %>%
+  pivot_longer(cols = c(PC1, PC2, hf),
+               names_to = "variable",
+               values_to = "value")
+
+ggplot(covars_long2, aes(x = region, y = value, fill = region)) +
+  geom_violin(alpha = 0.6) +
+  geom_boxplot(width = 0.2, outlier.size = 0.8) +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") +
+  labs(title = "Region-Level Variation in Climate PCs and Human Footprint",
+       x = "Region", y = "Value")
+
+```
+
+```{r}
+covars <- covars %>%
+  mutate(
+    # Grouping 0: original regions
+    region_group0 = region,
+
+    # Grouping 1: Combine Rocky+Foothills + Shield+Boreal
+    region_group1 = case_when(
+      region %in% c("Rocky+Foothills", "Shield+Boreal") ~ "Rocky/Shield Combined",
+      region == "Grassland+Parkland" ~ "Grassland+Parkland",
+      TRUE ~ NA_character_
+    ),
+
+    # Grouping 2: Drop Rocky+Foothills entirely
+    region_group2 = case_when(
+      region == "Shield+Boreal" ~ "Shield+Boreal",
+      region == "Grassland+Parkland" ~ "Grassland+Parkland",
+      TRUE ~ NA_character_
+    )
+  )
+
+
+plot_data1 <- covars %>%
+  filter(!is.na(region_group1)) %>%
+  select(region_group1, PC1, PC2, hf) %>%
+  pivot_longer(cols = c(PC1, PC2, hf),
+               names_to = "variable",
+               values_to = "value")
+
+plot_data2 <- covars %>%
+  filter(!is.na(region_group2)) %>%
+  select(region_group2, PC1, PC2, hf) %>%
+  pivot_longer(cols = c(PC1, PC2, hf),
+               names_to = "variable",
+               values_to = "value")
+p1 <- ggplot(plot_data1, aes(x = region_group1, y = value, fill = region_group1)) +
+  geom_violin(alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.size = 0.8) +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1),
+        legend.position = "none") +
+  labs(title = "A) Rocky+Foothills + Shield+Boreal Combined vs Grassland+Parkland",
+       x = "Region Group", y = "Value")
+
+p2 <- ggplot(plot_data2, aes(x = region_group2, y = value, fill = region_group2)) +
+  geom_violin(alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.size = 0.8) +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1),
+        legend.position = "none") +
+  labs(title = "B) Shield+Boreal vs Grassland+Parkland (Rocky+Foothills Removed)",
+       x = "Region Group", y = "Value")
+
+library(patchwork)
+
+combined_plot <- p1 / p2  # stacked panels
+combined_plot
+
+site_counts_by_group <- covars %>%
+  select(site, region_group0, region_group1, region_group2) %>%
+  distinct() %>%
+  pivot_longer(cols = starts_with("region_group"),
+               names_to = "grouping",
+               values_to = "region_group") %>%
+  filter(!is.na(region_group)) %>%
+  count(grouping, region_group, name = "n_sites")
+
+dets_joined <- study_main_reports %>%
+  left_join(covars %>% select(site, region_group0, region_group1, region_group2),
+            by = "site")
+
+detection_counts_by_group <- dets_joined %>%
+  pivot_longer(cols = starts_with("region_group"),
+               names_to = "grouping",
+               values_to = "region_group") %>%
+  filter(!is.na(region_group)) %>%
+  count(grouping, region_group, name = "n_detections")
+
+p_sites <- ggplot(site_counts_by_group,
+                  aes(x = region_group, y = n_sites, fill = region_group)) +
+  geom_col() +
+  facet_wrap(~ grouping, scales = "free_x") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1),
+        legend.position = "none") +
+  labs(title = "Number of Sites per Region Grouping",
+       x = "Region Group", y = "Number of Sites")
+
+p_dets <- ggplot(detection_counts_by_group,
+                 aes(x = region_group, y = n_detections, fill = region_group)) +
+  geom_col() +
+  facet_wrap(~ grouping, scales = "free_x") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1),
+        legend.position = "none") +
+  labs(title = "Number of Detections per Region Grouping",
+       x = "Region Group", y = "Number of Detections")
+
+combined_counts <- p_sites / p_dets
+combined_counts
+
+
 ```
 
 #Covariate data exploration
