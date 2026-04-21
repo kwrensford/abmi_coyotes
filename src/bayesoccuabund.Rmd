@@ -789,7 +789,6 @@ plot_effects(lynx_nmix_stan, submodel = "state")
 plot_effects(lynx_nmix_stan, submodel = "det")
 
 traceplot(lynx_nmix_stan, pars=c("beta_state", "beta_det"))
-plot_residuals(lynx_nmix_stan, submodel = "state", covariate = "hf")
 
 plot_posteriors(lynx_nmix_stan)
 
@@ -1010,7 +1009,7 @@ stan_data <- list(
   clim_pc2 = clim_pc2,
   human_fp = human_fp,
   baited   = baited_arr,
-  K        = 200  # or some upper bound for N
+  K        = 100  # or some upper bound for N
 )
 
 ```
