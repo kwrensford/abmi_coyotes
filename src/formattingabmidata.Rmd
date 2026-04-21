@@ -147,23 +147,6 @@ study_intervals <- study_main_reports %>%
   group_by(species_common_name, location) %>%
   mutate(delta_time = as.numeric(difftime(image_date_time, lag(image_date_time), units = "mins"))) %>%
   ungroup()
-
-#Visualize on a histogram
-ggplot(study_intervals, aes(x = delta_time)) +
-  geom_histogram() +
-  facet_wrap(~ species_common_name)
-
-
-ggplot(study_intervals, aes(x = delta_time)) +
-  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
-  facet_wrap(~ species_common_name, scales = "free_y") +
-  coord_cartesian(xlim = c(0, 120))+
-  theme_minimal() +
-  labs(
-    title = "Detection Interval Histograms (0–120 minutes)",
-    x = "Minutes since previous detection",
-    y = "Frequency"
-  )
 ```
 
 ```{r}
@@ -195,59 +178,6 @@ study_main_reports <- independent_events
 ```
 
 ##Latitudinal and Natural Region Partitioning
-```{r}
-##Visualize detections by latitude for each species
-study_main_reports %>%
-  ggplot(aes(x = latitude)) +
-  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
-  facet_wrap(~ species_common_name, ncol = 2, scales = "free_y") +
-  labs(
-    title = "Latitude Distribution of Camera Trap Detections",
-    x = "Latitude",
-    y = "Frequency"
-  ) +
-  theme_minimal()
-
-##Visualize sites per Latitude
-covariates_NR <- covariates_fixed %>%
-  arrange(NR, NSR) %>%
-  mutate(NSR = factor(NSR, levels = unique(NSR)))
-
-ggplot(covariates_NR, aes(x = Latitude, fill = NSR)) +
-  geom_histogram(position = "stack", bins = 30, color = "black") +
-  scale_fill_viridis_d(option = "turbo") +
-  labs(
-    x = "Latitude",
-    y = "Number of Camera Sites",
-    fill = "Subregion",
-    title = "Stacked Histogram of Camera Sites by Latitude"
-  ) +
-  theme_minimal()
-
-NR_table <- covariates_fixed %>%
-  distinct(NR, NSR) %>%
-  group_by(NR) %>%
-  summarise(NSR = paste(sort(unique(NSR)), collapse = ", ")) %>%
-  arrange(NR)
-
-knitr::kable(NR_table, format = "markdown")
-
-
-##Set latitudinal thresholds
-lo_lat <- 54
-hi_lat <- 57
-  
-##Create latitude threshold covariate for each observation
-
-study_main_reports <- study_main_reports %>%
-  mutate(
-    latitude_region = case_when(
-      latitude > hi_lat ~ "High latitude",
-      latitude < hi_lat & latitude > lo_lat~ "Mid latitude",
-      latitude <lo_lat ~ "Low latitude"
-    )
-  )
-```
 
 
 ```{r}
@@ -363,7 +293,25 @@ ggplot(covariates_fixed, aes(x = Longitude, y = Latitude, color = region)) +
   theme_minimal()+
   geom_point()
 
+covariates_fixed <- covariates_fixed %>%
+  mutate(
+    # Grouping 0: original regions
+    region_group0 = region,
 
+    # Grouping 1: Combine Rocky+Foothills + Shield+Boreal
+    region_group1 = case_when(
+      region %in% c("Rocky+Foothills", "Shield+Boreal") ~ "Rocky/Shield Combined",
+      region == "Grassland+Parkland" ~ "Grassland+Parkland",
+      TRUE ~ NA_character_
+    ),
+
+    # Grouping 2: Drop Rocky+Foothills entirely
+    region_group2 = case_when(
+      region == "Shield+Boreal" ~ "Shield+Boreal",
+      region == "Grassland+Parkland" ~ "Grassland+Parkland",
+      TRUE ~ NA_character_
+    )
+  )
 
 ```
 
@@ -390,7 +338,7 @@ ggplot(det_summary, aes(x = region, y = n, fill = species_common_name)) +
 
 ```
 
-##Create detection matrices for each species
+##Create detection and count matrices for each species
 
 ```{r}
 # camtrapR occupancy modeling workflow
@@ -400,6 +348,15 @@ study_camlocations <- unique(study_main_reports$location)
 
 study_image_reports <- study_image_reports %>%
   filter(location %in% study_camlocations)
+
+##Join study region data to detections
+cov_filtered <- covariates_fixed %>%
+  semi_join(study_main_reports, by = "location") %>%
+  distinct(location, .keep_all = TRUE)
+
+study_main_reports <- study_main_reports %>%
+  left_join(cov_filtered, by = "location")
+
 
 ##Use image reports file to extract camera operation dates for each location
 camera_operation_dates_v2<-study_image_reports %>%
@@ -463,25 +420,75 @@ camera_operation_matrix<-cameraOperation(camera_deployment_problems,
                                          dateFormat = "ymd_HMS"
                                          )
 
+camera_operation_matrix_clean <- camtrapR:::deparseCamOpRownames(camera_operation_matrix)
+
+rownames(camera_operation_matrix_clean) <- camera_operation_matrix_clean$station
+camera_operation_matrix_clean$session <- NULL
+
+camera_operation_matrix_clean <- as.matrix(camera_operation_matrix_clean)
+
+##Camera detection history
+datetime_check<-as.POSIXct(study_main_reports$image_date_time, format = ymd_HMS)
+invalid_entries<-study_main_reports[is.na(datetime_check),]
+invalid_entries
+
+###Daylight savings time!! 4 coyote observations fall in the DST hour, so shifting to 3:00 to compensate (I'll figure out a more elegant way to do this later)
+
+##entries 255396,255397,1882366,7326233
+
+#study_main_reports[255396,9] <- as.POSIXct("2015-03-08 3:03:29", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[255397,9]<- as.POSIXct("2015-03-08 3:03:49", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[1882366,9]<- as.POSIXct("2015-03-08 3:00:01", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#study_main_reports[7326233,9]<- as.POSIXct("2018-03-11 3:15:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+
+##Create detection tables for each focal species with a week  long (7 day) occasion length
+
 #Function
 
-make_matrices <- function(det_df, camop_df, species, region = NULL,
+make_matrices <- function(det_df,
+                          camop_df,
+                          species,
+                          region = NULL,
                           occasion_length = 7,
                           day1 = "station",
                           tz = "America/Edmonton") {
   
-  # Filter by species
-  df <- det_df %>% filter(species_common_name == species)
+  #------------------------------------------------------------
+  # 1. Filter by species
+  #------------------------------------------------------------
+  df <- det_df %>% 
+    filter(species_common_name == species)
   
-  # Optional region filter (region must be in det_df)
+  if (nrow(df) == 0) {
+    stop(paste("No records found for species:", species))
+  }
+  
+  #------------------------------------------------------------
+  # 2. Optional region filter
+  #------------------------------------------------------------
   if (!is.null(region)) {
-    df <- df %>% filter(year == region)   # or your real region column
+    
+    # Check region exists
+    if (!region %in% unique(det_df$region)) {
+      stop(paste("Region", region, "not found in detection dataset"))
+    }
+    
+    df <- df %>% filter(region == !!region)
+    
+    if (nrow(df) == 0) {
+      stop(paste("No records for species", species, "in region", region))
+    }
+    
+    # Subset camOp to only stations present in filtered detections
     camop_sub <- camop_df[rownames(camop_df) %in% df$location, ]
+    
   } else {
     camop_sub <- camop_df
   }
   
-  # Detection history (binary)
+  #------------------------------------------------------------
+  # 3. Detection history (binary)
+  #------------------------------------------------------------
   dh <- detectionHistory(
     recordTable = df,
     camOp = camop_sub,
@@ -500,7 +507,9 @@ make_matrices <- function(det_df, camop_df, species, region = NULL,
     unmarkedMultFrameInput = TRUE
   )
   
-  # Count matrix
+  #------------------------------------------------------------
+  # 4. Count matrix
+  #------------------------------------------------------------
   cm <- detectionHistory(
     recordTable = df,
     camOp = camop_sub,
@@ -519,13 +528,30 @@ make_matrices <- function(det_df, camop_df, species, region = NULL,
     unmarkedMultFrameInput = TRUE
   )
   
+  #------------------------------------------------------------
+  # 5. Return both matrices
+  #------------------------------------------------------------
   return(list(
     detection_matrix = dh$detection_history,
     count_matrix = cm$detection_history
   ))
 }
 
+
 coyote <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix,
+  species = "Coyote"
+)
+
+coyote_boreal <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix_clean,
+  species = "Coyote",
+  region = "Shield+Boreal"
+)
+
+coyote_park <- make_matrices(
   det_df = study_main_reports,
   camop_df = camera_operation_matrix,
   species = "Coyote"
@@ -534,232 +560,42 @@ coyote <- make_matrices(
 coyote$detection_matrix
 coyote$count_matrix
 
+redfox <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix,
+  species = "Red Fox"
+)
 
+lynx <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix,
+  species = "Canada Lynx"
+)
 
-##Camera detection history
-datetime_check<-as.POSIXct(study_main_reports$image_date_time, format = ymd_HMS)
-invalid_entries<-study_main_reports[is.na(datetime_check),]
-invalid_entries
+marten <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix,
+  species = "Marten"
+)
 
-###Daylight savings time!! 4 coyote observations fall in the DST hour, so shifting to 3:00 to compensate (I'll figure out a more elegant way to do this later)
-
-##entries 255396,255397,1882366,7326233
-
-#study_main_reports[255396,9] <- as.POSIXct("2015-03-08 3:03:29", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-#study_main_reports[255397,9]<- as.POSIXct("2015-03-08 3:03:49", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-#study_main_reports[1882366,9]<- as.POSIXct("2015-03-08 3:00:01", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-#study_main_reports[7326233,9]<- as.POSIXct("2018-03-11 3:15:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-
-##Create detection tables for each focal species with a week  long (7 day) occasion length
-
-##Coyote
-coyotedetectionhistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Coyote",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-
-coyotedetections<-coyotedetectionhistory$detection_history
-
-##Lynx
-lynxdetectionhistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Canada Lynx",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-lynxdetections<-lynxdetectionhistory$detection_history
-
-
-##Red Fox
-redfoxdetectionhistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Red Fox",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-redfoxdetections<-redfoxdetectionhistory$detection_history
-
-##Marten
-martendetectionhistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Marten",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-martendetections<-martendetectionhistory$detection_history
-
-
-##Fisher
-fisherdetectionhistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Fisher",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-fisherdetections<-fisherdetectionhistory$detection_history
-```
-
-##Abundance counts
-
-```{r}
-##Coyote
-coyoteabundancehistory <-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         output = "count",
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Coyote",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-
-coyotecounts <-coyoteabundancehistory$detection_history
-
-
-##Lynx
-lynxabundancehistory <- detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         output = "count",
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Canada Lynx",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-lynxcounts <-lynxabundancehistory$detection_history
-
-##Red Fox
-redfoxabundancehistory <- detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         output = "count",
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Red Fox",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-redfoxcounts <-redfoxabundancehistory$detection_history
-
-
-##Marten
-martenabundancehistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         output = "count",
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Marten",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-martencounts<-martenabundancehistory$detection_history
-
-
-##Fisher
-fisherabundancehistory<-detectionHistory(recordTable = study_main_reports,
-                                         camOp = camera_operation_matrix,
-                                         output = "count",
-                                         stationCol = "location",
-                                         speciesCol = "species_common_name",
-                                         recordDateTimeCol = "image_date_time",
-                                         recordDateTimeFormat = "ymd_HMS",
-                                         species = "Fisher",
-                                         occasionLength = 7,
-                                         day1 = "station",
-                                         datesAsOccasionNames = FALSE,
-                                         includeEffort = TRUE,
-                                         scaleEffort = FALSE,
-                                         timeZone = "America/Edmonton",
-                                         unmarkedMultFrameInput = TRUE
-                                         )
-fishercounts<-fisherabundancehistory$detection_history
+fisher <- make_matrices(
+  det_df = study_main_reports,
+  camop_df = camera_operation_matrix,
+  species = "Fisher"
+)
 ```
 
 ##Align covariates location names with detection matrix locations (same number and order)
 
 ```{r}
 covariates_aligned <- covariates_fixed %>%
-  filter(location %in% row.names(coyotedetections)) %>%
-  arrange(match(location, row.names(coyotedetections)))
+  filter(location %in% row.names(coyote$detection_matrix)) %>%
+  arrange(match(location, row.names(coyote$detection_matrix)))
 
 # ensure same order
-all(row.names(coyotedetections) == covariates_aligned$location)
+all(row.names(coyote$detection_matrix) == covariates_aligned$location)
 
-sites_det <- rownames(coyotedetections)
+sites_det <- rownames(coyote$detection_matrix)
 sites_cov <- covariates_aligned$location
 
 setdiff(sites_det, sites_cov)  # sites in detections but not in covariates
@@ -768,27 +604,27 @@ setdiff(sites_cov, sites_det)  # sites in covariates but not in detections
 common_sites <- intersect(sites_det, sites_cov)
 
 # filter detections
-coyotedetections <- coyotedetections[common_sites, ]
-coyotecounts <- coyotecounts[common_sites, ]
-lynxdetections <- lynxdetections[common_sites, ]
-lynxcounts <- lynxcounts[common_sites, ]
-martendetections <- martendetections[common_sites, ]
-martencounts <- martencounts[common_sites, ]
-fisherdetections <- fisherdetections[common_sites, ]
-fishercounts <- fishercounts[common_sites, ]
-redfoxdetections <- redfoxdetections[common_sites, ]
-redfoxcounts <- redfoxcounts[common_sites, ]
+coyote$detection_matrix <- coyote$detection_matrix[common_sites, ]
+coyote$count_matrix <- coyote$count_matrix[common_sites, ]
+lynx$detection_matrix <- lynx$detection_matrix[common_sites, ]
+lynx$count_matrix <- lynx$count_matrix[common_sites, ]
+marten$detection_matrix <- marten$detection_matrix[common_sites, ]
+marten$count_matrix <- marten$count_matrix[common_sites, ]
+fisher$detection_matrix <- fisher$detection_matrix[common_sites, ]
+fisher$count_matrix <- fisher$count_matrix[common_sites, ]
+redfox$detection_matrix <- redfox$detection_matrix[common_sites, ]
+redfox$count_matrix <- redfox$count_matrix[common_sites, ]
 
-coyotedetections <- coyotedetections[rownames(coyotedetections) != "1095-SE",]
-coyotecounts <- coyotecounts[rownames(coyotecounts) != "1095-SE",]
-lynxdetections <- lynxdetections[rownames(lynxdetections) != "1095-SE",]
-lynxcounts <- lynxcounts[rownames(lynxcounts) != "1095-SE",]
-martendetections <- martendetections[rownames(martendetections) != "1095-SE",]
-martencounts <- martencounts[rownames(martencounts) != "1095-SE",]
-fisherdetections <- fisherdetections[rownames(fisherdetections) != "1095-SE",]
-fishercounts <- fishercounts[rownames(fishercounts) != "1095-SE",]
-redfoxdetections <- redfoxdetections[rownames(redfoxdetections) != "1095-SE",]
-redfoxcounts <- redfoxcounts[rownames(redfoxcounts) != "1095-SE",]
+coyote$detection_matrix <- coyote$detection_matrix[rownames(coyote$detection_matrix) != "1095-SE",]
+coyote$count_matrix <- coyote$count_matrix[rownames(coyote$count_matrix) != "1095-SE",]
+lynx$detection_matrix <- lynx$detection_matrix[rownames(lynx$detection_matrix) != "1095-SE",]
+lynx$count_matrix <- lynx$count_matrix[rownames(lynx$count_matrix) != "1095-SE",]
+marten$detection_matrix <- marten$detection_matrix[rownames(marten$detection_matrix) != "1095-SE",]
+marten$count_matrix <- marten$count_matrix[rownames(marten$count_matrix) != "1095-SE",]
+fisher$detection_matrix <- fisher$detection_matrix[rownames(fisher$detection_matrix) != "1095-SE",]
+fisher$count_matrix <- fisher$count_matrix[rownames(fisher$count_matrix) != "1095-SE",]
+redfox$detection_matrix <- redfox$detection_matrix[rownames(redfox$detection_matrix) != "1095-SE",]
+redfox$count_matrix <- redfox$count_matrix[rownames(redfox$count_matrix) != "1095-SE",]
 
 # filter covariates
 covariates_aligned <- covariates_aligned %>%
@@ -805,11 +641,11 @@ table(covariates_aligned$location)
 covariates_unique <- covariates_aligned %>%
   distinct(location, .keep_all = TRUE)
 
-identical(rownames(coyotedetections), covariates_unique$location)
-identical(rownames(lynxdetections), covariates_unique$location)
-identical(rownames(martendetections), covariates_unique$location)
-identical(rownames(fisherdetections), covariates_unique$location)
-identical(rownames(redfoxdetections), covariates_unique$location)
+identical(rownames(coyote$detection_matrix), covariates_unique$location)
+identical(rownames(lynx$detection_matrix), covariates_unique$location)
+identical(rownames(marten$detection_matrix), covariates_unique$location)
+identical(rownames(fisher$detection_matrix), covariates_unique$location)
+identical(rownames(redfox$detection_matrix), covariates_unique$location)
 ```
 
 ##Dimension reduction of climate data
@@ -1168,26 +1004,7 @@ ggplot(covars_long2, aes(x = region, y = value, fill = region)) +
 ```
 
 ```{r}
-covars <- covars %>%
-  mutate(
-    # Grouping 0: original regions
-    region_group0 = region,
-
-    # Grouping 1: Combine Rocky+Foothills + Shield+Boreal
-    region_group1 = case_when(
-      region %in% c("Rocky+Foothills", "Shield+Boreal") ~ "Rocky/Shield Combined",
-      region == "Grassland+Parkland" ~ "Grassland+Parkland",
-      TRUE ~ NA_character_
-    ),
-
-    # Grouping 2: Drop Rocky+Foothills entirely
-    region_group2 = case_when(
-      region == "Shield+Boreal" ~ "Shield+Boreal",
-      region == "Grassland+Parkland" ~ "Grassland+Parkland",
-      TRUE ~ NA_character_
-    )
-  )
-
+#Comparing covariates across natural regions and analysis groups
 
 plot_data1 <- covars %>%
   filter(!is.na(region_group1)) %>%
@@ -1290,188 +1107,6 @@ cor.test(covars$Latitude, covars$PC1)
 cor.test(covars$Latitude, covars$PC2)
 ```
 
-#Raw coyote counts
-```{r}
-counts_per_site <- rowSums(coyotedetections, na.rm = TRUE)
-counts_per_site
-
-coyote_covars <- covars %>%
-  mutate(coyote_counts = counts_per_site)
-
-plot(coyote_covars$PC1, coyote_covars$coyote_counts)
-
-plot(coyote_covars$PC2, coyote_covars$coyote_counts)
-
-plot(coyote_covars$hf, coyote_covars$coyote_counts)
-```
-
-```{r}
-# assuming your long dataframe is called `long_df` 
-site_counts_wide <- site_counts %>%
-  pivot_wider(
-    names_from = species,  # column with species names
-    values_from = detections    # column with counts
-  )
-
-site_counts_wide <- site_counts_wide %>%
-  dplyr::select(!site)
-
-explore_df <- cbind(covars, site_counts_wide)
-
-species_list <- c("coyote", "lynx", "marten", "fisher", "redfox")
-
-cov_to_plot <- "built"
-
-plots <- lapply(species_list, function(sp) {
-  ggplot(explore_df, aes_string(x = cov_to_plot, y = sp)) +
-    geom_point(alpha = 0.4) +
-    geom_smooth(method = "loess") +
-    labs(title = paste("Detections of", sp, "vs", cov_to_plot),
-         x = cov_to_plot,
-         y = "Detection count per site") +
-    theme_bw()
-})
-
-plots
-```
-
-##Binning based on latitude, hf, etc.
-```{r}
-site_detections <- study_main_reports %>%
-  count(location, name = "detections")
-
-df <- covars %>%
-  left_join(site_detections, by = "location") %>%
-  mutate(detections = ifelse(is.na(detections), 0, detections))
-
-vars <- c("Latitude", "PC1", "PC2", "hf", "roads", "rail", "built",
-          "oil_gas", "forestry", "mines", "crop", "pasture",
-          "linear", "industrial", "agriculture")
-
-cov_scaled <- covars %>%
-  select(all_of(vars)) %>%
-  mutate(across(everything(), as.numeric)) %>%
-  mutate(across(everything(), scale))
-
-pca <- prcomp(cov_scaled, scale = FALSE)
-summary(pca)
-pca_scores <- as.data.frame(pca$x[,1:6])
-
-diss <- dist(pca_scores, method = "euclidean")
-
-#Detection Balance
-
-library(WeightedCluster)
-
-weighted_kmeans <- function(data, weights, k) {
-  wcKMedoids(data, k = k, weights = weights)
-}
-
-detection_balance <- function(cluster_assignments, detections) {
-  totals <- tapply(detections, cluster_assignments, sum)
-  sd(totals) / mean(totals)
-}
-
-covariate_balance <- function(cluster_assignments, cov_scaled) {
-  by_cluster <- split(cov_scaled, cluster_assignments)
-  mean(sapply(by_cluster, function(x) mean(apply(x, 2, var))))
-}
-
-results <- data.frame()
-
-for (k in 2:20) {
-  model <- weighted_kmeans(diss, k = k, weights = df$detections)
-  clusters <- model$clustering
-  
-  det_cv <- detection_balance(clusters, df$detections)
-  cov_var <- covariate_balance(clusters, cov_scaled)
-  
-  results <- rbind(results, data.frame(
-    k = k,
-    detection_cv = det_cv,
-    covariate_variance = cov_var
-  ))
-}
-
-print(results)
-http://127.0.0.1:39924/graphics/plot_zoom_png?width=827&height=863
-k_optimal <- results$k[which.min(results$detection_cv)]
-
-final_model <- wcKMedoids(diss, k = k_optimal, weights = df$detections)
-clusters <- final_model$clustering
-cluster_ids <-match(clusters, unique(clusters))
-df$bin <- cluster_ids
-
-ggplot(data.frame(pca_scores, bin = factor(df$bin)),
-       aes(PC1, PC2, color = bin)) +
-  geom_point(alpha = 0.6) +
-  stat_ellipse(type = "norm", linewidth = 1) +
-  theme_minimal() +
-  labs(title = "Cluster Ellipses in PCA Space")
-
-
-df_long <- df %>%
-  select(bin = bin, Latitude, PC1, PC2, hf, roads, rail, built, oil_gas, forestry, mines, crop, pasture, linear, industrial, agriculture) %>%
-  pivot_longer(-bin, names_to = "variable", values_to = "value")
-
-ggplot(df_long, aes(x = factor(bin), y = value, fill = factor(bin))) +
-  geom_violin(alpha = 0.6) +
-  geom_boxplot(width = 0.2, outlier.size = 0.5) +
-  facet_wrap(~ variable, scales = "free_y") +
-  theme_minimal() +
-  labs(title = "Distribution of Original Variables by Bin",
-       x = "Bin",
-       y = "Value",
-       fill = "Bin")
-
-det_balance <- df %>%
-  group_by(bin) %>%
-  summarise(
-    n_sites = n(),
-    total_detections = sum(detections),
-    mean_detections = mean(detections),
-    median_detections = median(detections)
-  )
-
-
-ggplot(det_balance, aes(x = factor(bin), y = total_detections, fill = factor(bin))) +
-  geom_col() +
-  theme_minimal() +
-  labs(
-    title = "Total Detections per Bin",
-    x = "Bin",
-    y = "Total Detections",
-    fill = "Bin"
-  )
-
-library(sf)
-library(ggplot2)
-library(rnaturalearth)
-library(rnaturalearthdata)
-
-# Get all Canadian provinces/territories
-canada <- ne_states(country = "Canada", returnclass = "sf")
-
-# Filter Alberta
-alberta <- canada[canada$name == "Alberta", ]
-
-# Plot
-ggplot() +
-  geom_sf(data = alberta, fill = "grey95", color = "black") +
-  geom_point(
-    data = df,
-    aes(x = longitude, y = latitude, color = factor(bin_simple)),
-    size = 2, alpha = 0.8
-  ) +
-  coord_sf() +
-  theme_minimal() +
-  labs(
-    title = "Bins Mapped on Alberta Basemap",
-    x = "Longitude",
-    y = "Latitude",
-    color = "Bin"
-  )
-```
 
 #Write CSV files
 
@@ -1479,16 +1114,16 @@ ggplot() +
 write.csv(covariates_unique, file = "data/ehscovars.csv", row.names = FALSE)
 write.csv(covars, file = "data/covars.csv", row.names = FALSE)
 
-write.csv(coyotedetections, file = "data/coyotedetections.csv", row.names = FALSE)
-write.csv(lynxdetections, file = "data/lynxdetections.csv", row.names = FALSE)
-write.csv(martendetections, file = "data/martendetections.csv", row.names = FALSE)
-write.csv(fisherdetections, file = "data/fisherdetections.csv", row.names = FALSE)
-write.csv(redfoxdetections, file = "data/redfoxdetections.csv", row.names = FALSE)
+write.csv(coyote$detection_matrix, file = "data/coyotedetections.csv", row.names = FALSE)
+write.csv(lynx$detection_matrix, file = "data/lynxdetections.csv", row.names = FALSE)
+write.csv(marten$detection_matrix, file = "data/martendetections.csv", row.names = FALSE)
+write.csv(fisher$detection_matrix, file = "data/fisherdetections.csv", row.names = FALSE)
+write.csv(redfox$detection_matrix, file = "data/redfoxdetections.csv", row.names = FALSE)
 
-write.csv(coyotecounts, file = "data/coyotecounts.csv", row.names = FALSE)
-write.csv(lynxcounts, file = "data/lynxcounts.csv", row.names = FALSE)
-write.csv(martencounts, file = "data/martencounts.csv", row.names = FALSE)
-write.csv(fishercounts, file = "data/fishercounts.csv", row.names = FALSE)
-write.csv(redfoxcounts, file = "data/redfoxcounts.csv", row.names = FALSE)
+write.csv(coyote$count_matrix, file = "data/coyotecounts.csv", row.names = FALSE)
+write.csv(lynx$count_matrix, file = "data/lynxcounts.csv", row.names = FALSE)
+write.csv(marten$count_matrix, file = "data/martencounts.csv", row.names = FALSE)
+write.csv(fisher$count_matrix, file = "data/fishercounts.csv", row.names = FALSE)
+write.csv(redfox$count_matrix, file = "data/redfoxcounts.csv", row.names = FALSE)
 
 ```

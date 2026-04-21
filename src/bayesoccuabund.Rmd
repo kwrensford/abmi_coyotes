@@ -77,6 +77,13 @@ covars$baited <- as.numeric(covars$baited)
 
 #Formatting count data into one row per site
 ```{r}
+
+site_covars <- covars %>%
+  group_by(site) %>%
+  slice(1) %>%   # keep the first camera per site
+  ungroup()
+
+
 make_site_level_mats <- function(Y, covars, occ_prefix = "o") {
   library(dplyr)
   library(tidyr)
@@ -562,78 +569,30 @@ plotEffects(redfox_nmix, "det", "baited")
 ```{r}
 ##Coyote
 umf_coyote <- unmarkedFramePCount(
-  y = y_mat,
+  y = coyote_y,
   siteCovs = site_covars,
-  obsCovs = list(bait = bait_mat, camera = cam_mat)
+  obsCovs = list(bait = coyote_bait, camera = coyote_camid)
 )
 
-coyote_nmix_stan <- stan_pcount(formula =  ~ bait + (1|site:camera)
+coyote_nmix_ubms <- stan_pcount(formula =  ~ bait 
                                 ~ PC1 * hf + PC2 * hf,
                      data = umf_coyote,
                      chains = 3,
                      iter = 500,
                      cores = 3)
 
-coyote_nmix_stan
-plot_effects(coyote_nmix_stan, submodel = "state")
-plot_effects(coyote_nmix_stan, submodel = "det")
+coyote_nmix_ubms
+plot_effects(coyote_nmix_ubms, submodel = "state")
+plot_effects(coyote_nmix_ubms, submodel = "det")
 
 
-traceplot(coyote_nmix_stan, pars=c("beta_state", "beta_det"))
-plot_residuals(coyote_nmix_stan, submodel = "state", covariate = "hf")
+traceplot(coyote_nmix_ubms, pars=c("beta_state", "beta_det"))
 
-plot_posteriors(coyote_nmix_stan)
+plot_posteriors(coyote_nmix_ubms)
 
-coyote_gof<-gof(coyote_nmix_stan, draws=100)
+coyote_gof<-gof(coyote_nmix_ubms, draws=100)
 coyote_gof
 plot(coyote_gof)
-```
-
-```{r}
-m <- coyote_nmix_stan
-post <- as.data.frame(rstan::extract(m@stanfit))
-
-abun <- post %>% 
-  dplyr::select(starts_with("beta_state.")) %>%
-  pivot_longer(everything(),
-               names_to="parameter",
-               values_to="value") %>%
-  mutate(type = "Abundance (log-scale)")
-
-det <- post %>% 
-  dplyr::select(starts_with("beta_det.")) %>%
-  pivot_longer(everything(),
-               names_to="parameter",
-               values_to="value") %>%
-  mutate(type = "Detection (logit-scale)")
-
-effects <- bind_rows(abun, det)
-
-effects_summary <- effects %>%
-  group_by(type, parameter) %>%
-  summarise(
-    mean = mean(value),
-    LCI = quantile(value, 0.025),
-    UCI = quantile(value, 0.975),
-    .groups="drop"
-  )
-
-param_names <- names(coef(m))
-
-effects_summary$names <- param_names
-
-ggplot(effects_summary,
-       aes(x = mean, y = names, color = type)) +
-  geom_point(size = 3) +
-  geom_errorbarh(aes(xmin = LCI, xmax = UCI), height = 0.2) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  labs(x = "Parameter Estimate", y = "") +
-  theme_bw() +
-  theme(
-    legend.position = "top",
-    text = element_text(size = 14)
-  )
-
 ```
 
 ```{r}
@@ -721,7 +680,7 @@ plot_interaction_ubms <- function(model,
 
 ```{r}
 coyote_pc1_plot <- plot_interaction_ubms(
-  model = coyote_nmix_stan,
+  model = coyote_nmix_ubms,
   focal = "PC1",
   moderator = "hf",
   species = "coyote",
@@ -736,7 +695,7 @@ coyote_pc1_plot
 
 ```{r}
 coyote_pc2_plot <- plot_interaction_ubms(
-  model = coyote_nmix_stan,
+  model = coyote_nmix_ubms,
   focal = "PC2",
   moderator = "hf",
   species = "coyote",
