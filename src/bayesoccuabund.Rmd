@@ -49,25 +49,49 @@ library(cmdstanr)
 ```{r}
 
 coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
-lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
-martencounts <- as.matrix(read.csv("data/martencounts.csv"))
-fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
+coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts.csv"))
+coyotecounts_park <- as.matrix(read.csv("data/coyotecounts_park.csv"))
+
+
 redfoxcounts <- as.matrix(read.csv("data/redfoxcounts.csv"))
+redfoxcounts <- as.matrix(read.csv("data/redfoxcounts_boreal.csv"))
+
+lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
+lynxcounts_boreal <- as.matrix(read.csv("data/lynxcounts_boreal.csv"))
+
+martencounts <- as.matrix(read.csv("data/martencounts.csv"))
+martencounts_boreal <- as.matrix(read.csv("data/martencounts.csv"))
+
+fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
+fishercounts_boreal <- as.matrix(read.csv("data/fishercounts_boreal.csv"))
+
+
+
 ```
 
 #Load in covariate data
 
 ```{r}
 covars <- read.csv("data/covars.csv")
+covars_boreal <- read.csv("data/covars.boreal.csv")
+covars_park <- read.csv("data/covars_park.csv")
 ```
 
 ```{r}
-cor.test(scale(covars$linear), scale(covars$abmi_linear))
-
 covars$PC1<-scale(covars$PC1)
 covars$PC2<-scale(covars$PC2)
 covars$hf<-scale(covars$hf)
 covars$baited <- as.numeric(covars$baited)
+
+covars_boreal$PC1<-scale(covars_boreal$PC1)
+covars_boreal$PC2<-scale(covars_boreal$PC2)
+covars_boreal$hf<-scale(covars_boreal$hf)
+covars_boreal$baited <- as.numeric(covars_boreal$baited)
+
+covars_park$PC1<-scale(covars_park$PC1)
+covars_park$PC2<-scale(covars_park$PC2)
+covars_park$hf<-scale(covars_park$hf)
+covars_park$baited <- as.numeric(covars_park$baited)
 ```
 
 #Formatting count data into one row per site

@@ -412,20 +412,39 @@ camera_deployment_problems<-camera_deployment_problems%>%
 #Build a camera operation matrix to fill with detections
 camera_operation_matrix<-cameraOperation(camera_deployment_problems,
                                          stationCol = "location",
-                                         sessionCol = "year",
                                          setupCol = "start_date_time",
+                                         sessionCol = "year",
                                          retrievalCol = "end_date_time",
                                          writecsv = FALSE,
                                          hasProblems = FALSE,
                                          dateFormat = "ymd_HMS"
                                          )
 
-camera_operation_matrix_clean <- camtrapR:::deparseCamOpRownames(camera_operation_matrix)
+collapse_sessions_fast <- function(camop_matrix) {
+  
+  # Convert to data frame
+  df <- as.data.frame(camop_matrix)
+  
+  # Extract station names by removing the session suffix
+  stations <- sub("__SESS_.*$", "", rownames(df))
+  
+  # Split by station
+  split_list <- split(df, stations)
+  
+  # Collapse each station using max, but replace -Inf with 0
+  collapsed <- lapply(split_list, function(x) {
+    out <- apply(x, 2, max, na.rm = TRUE)
+    out[is.infinite(out)] <- 0   # replace -Inf with 0
+    out
+  })
+  
+  # Bind back into a matrix
+  out <- do.call(rbind, collapsed)
+  
+  return(out)
+}
 
-rownames(camera_operation_matrix_clean) <- camera_operation_matrix_clean$station
-camera_operation_matrix_clean$session <- NULL
-
-camera_operation_matrix_clean <- as.matrix(camera_operation_matrix_clean)
+camop_clean <- collapse_sessions_fast(camera_operation_matrix)
 
 ##Camera detection history
 datetime_check<-as.POSIXct(study_main_reports$image_date_time, format = ymd_HMS)
@@ -454,33 +473,36 @@ make_matrices <- function(det_df,
                           tz = "America/Edmonton") {
   
   #------------------------------------------------------------
-  # 1. Filter by species
+  # 1. Filter detections by species (but do NOT drop stations)
   #------------------------------------------------------------
-  df <- det_df %>% 
+  det_species <- det_df %>% 
     filter(species_common_name == species)
   
-  if (nrow(df) == 0) {
-    stop(paste("No records found for species:", species))
-  }
-  
   #------------------------------------------------------------
-  # 2. Optional region filter
+  # 2. Subset stations by region (for BOTH detections and camOp)
   #------------------------------------------------------------
   if (!is.null(region)) {
     
-    # Check region exists
-    if (!region %in% unique(det_df$region)) {
-      stop(paste("Region", region, "not found in detection dataset"))
+    # All stations in region (from metadata, not detections)
+    stations_region <- det_df %>%
+      filter(region == !!region) %>%
+      pull(location) %>%
+      unique()
+    
+    if (length(stations_region) == 0) {
+      stop(paste("Region", region, "has no stations in detection metadata"))
     }
     
-    df <- df %>% filter(region == !!region)
+    # Subset camOp to ALL stations in region
+    camop_sub <- camop_df[rownames(camop_df) %in% stations_region, , drop = FALSE]
     
-    if (nrow(df) == 0) {
-      stop(paste("No records for species", species, "in region", region))
+    if (nrow(camop_sub) == 0) {
+      stop("No matching stations in camOp for this region")
     }
     
-    # Subset camOp to only stations present in filtered detections
-    camop_sub <- camop_df[rownames(camop_df) %in% df$location, ]
+    # Subset detections to region (species already filtered)
+    det_species <- det_species %>% 
+      filter(location %in% stations_region)
     
   } else {
     camop_sub <- camop_df
@@ -488,9 +510,10 @@ make_matrices <- function(det_df,
   
   #------------------------------------------------------------
   # 3. Detection history (binary)
+  #    IMPORTANT: keep all stations, even with zero detections
   #------------------------------------------------------------
   dh <- detectionHistory(
-    recordTable = df,
+    recordTable = det_species,
     camOp = camop_sub,
     stationCol = "location",
     speciesCol = "species_common_name",
@@ -504,14 +527,14 @@ make_matrices <- function(det_df,
     scaleEffort = FALSE,
     timeZone = tz,
     output = "binary",
-    unmarkedMultFrameInput = TRUE
+    unmarkedMultFrameInput = FALSE   # single-session camOp
   )
   
   #------------------------------------------------------------
-  # 4. Count matrix
+  # 4. Count matrix (same logic)
   #------------------------------------------------------------
   cm <- detectionHistory(
-    recordTable = df,
+    recordTable = det_species,
     camOp = camop_sub,
     stationCol = "location",
     speciesCol = "species_common_name",
@@ -525,7 +548,7 @@ make_matrices <- function(det_df,
     scaleEffort = FALSE,
     timeZone = tz,
     output = "count",
-    unmarkedMultFrameInput = TRUE
+    unmarkedMultFrameInput = FALSE
   )
   
   #------------------------------------------------------------
@@ -538,23 +561,25 @@ make_matrices <- function(det_df,
 }
 
 
+
 coyote <- make_matrices(
   det_df = study_main_reports,
-  camop_df = camera_operation_matrix,
+  camop_df = camop_clean,
   species = "Coyote"
 )
 
 coyote_boreal <- make_matrices(
-  det_df = study_main_reports,
-  camop_df = camera_operation_matrix_clean,
+  det_df = det_with_region,
+  camop_df = camop_clean,
   species = "Coyote",
   region = "Shield+Boreal"
 )
 
 coyote_park <- make_matrices(
-  det_df = study_main_reports,
-  camop_df = camera_operation_matrix,
-  species = "Coyote"
+  det_df = det_with_region,
+  camop_df = camop_clean,
+  species = "Coyote",
+  region = "Grassland+Parkland"
 )
 
 coyote$detection_matrix
@@ -566,86 +591,96 @@ redfox <- make_matrices(
   species = "Red Fox"
 )
 
+redfox_boreal <- make_matrices(
+  det_df = det_with_region,
+  camop_df = camop_clean,
+  species = "Red Fox",
+  region = "Shield+Boreal"
+)
+
+redfox_park <- make_matrices(
+  det_df = det_with_region,
+  camop_df = camop_clean,
+  species = "Red Fox",
+  region = "Grassland+Parkland"
+)
+
 lynx <- make_matrices(
   det_df = study_main_reports,
-  camop_df = camera_operation_matrix,
+  camop_df = camop_clean,
   species = "Canada Lynx"
+)
+
+lynx_boreal <- make_matrices(
+  det_df = det_with_region,
+  camop_df = camop_clean,
+  species = "Canada Lynx",
+  region = "Shield+Boreal"
 )
 
 marten <- make_matrices(
   det_df = study_main_reports,
-  camop_df = camera_operation_matrix,
+  camop_df = camop_clean,
   species = "Marten"
 )
 
+marten_boreal <- make_matrices(
+  det_df = det_with_region,
+  camop_df = camera_operation_matrix,
+  species = "Marten"
+)
+  
 fisher <- make_matrices(
   det_df = study_main_reports,
-  camop_df = camera_operation_matrix,
-  species = "Fisher"
+  camop_df = camop_clean,
+  species = "Fisher",
+  region = "Shield+Boreal"
 )
+
+fisher_boreal <- make_matrices(
+  det_df = det_with_region,
+  camop_df = camop_clean,
+  species = "Fisher",
+  region = "Shield+Boreal"
+)
+  
 ```
 
 ##Align covariates location names with detection matrix locations (same number and order)
 
 ```{r}
-covariates_aligned <- covariates_fixed %>%
-  filter(location %in% row.names(coyote$detection_matrix)) %>%
-  arrange(match(location, row.names(coyote$detection_matrix)))
+stations_to_keep <- rownames(camop_clean)
+length(stations_to_keep)   # should be 1608
 
-# ensure same order
-all(row.names(coyote$detection_matrix) == covariates_aligned$location)
+# 1. Build covariates once
+covariates_unique <- covariates_fixed %>% 
+  filter(location %in% stations_to_keep)
 
-sites_det <- rownames(coyote$detection_matrix)
-sites_cov <- covariates_aligned$location
+extra_covariates <- setdiff(covariates_unique$location, rownames(camop_clean))
+extra_covariates
+length(extra_covariates)
 
-setdiff(sites_det, sites_cov)  # sites in detections but not in covariates
-setdiff(sites_cov, sites_det)  # sites in covariates but not in detections
+dup_stations <- covariates_unique$location[duplicated(covariates_unique$location)]
+dup_stations
+length(dup_stations)
 
-common_sites <- intersect(sites_det, sites_cov)
+table(covariates_unique$location[duplicated(covariates_unique$location)])
 
-# filter detections
-coyote$detection_matrix <- coyote$detection_matrix[common_sites, ]
-coyote$count_matrix <- coyote$count_matrix[common_sites, ]
-lynx$detection_matrix <- lynx$detection_matrix[common_sites, ]
-lynx$count_matrix <- lynx$count_matrix[common_sites, ]
-marten$detection_matrix <- marten$detection_matrix[common_sites, ]
-marten$count_matrix <- marten$count_matrix[common_sites, ]
-fisher$detection_matrix <- fisher$detection_matrix[common_sites, ]
-fisher$count_matrix <- fisher$count_matrix[common_sites, ]
-redfox$detection_matrix <- redfox$detection_matrix[common_sites, ]
-redfox$count_matrix <- redfox$count_matrix[common_sites, ]
-
-coyote$detection_matrix <- coyote$detection_matrix[rownames(coyote$detection_matrix) != "1095-SE",]
-coyote$count_matrix <- coyote$count_matrix[rownames(coyote$count_matrix) != "1095-SE",]
-lynx$detection_matrix <- lynx$detection_matrix[rownames(lynx$detection_matrix) != "1095-SE",]
-lynx$count_matrix <- lynx$count_matrix[rownames(lynx$count_matrix) != "1095-SE",]
-marten$detection_matrix <- marten$detection_matrix[rownames(marten$detection_matrix) != "1095-SE",]
-marten$count_matrix <- marten$count_matrix[rownames(marten$count_matrix) != "1095-SE",]
-fisher$detection_matrix <- fisher$detection_matrix[rownames(fisher$detection_matrix) != "1095-SE",]
-fisher$count_matrix <- fisher$count_matrix[rownames(fisher$count_matrix) != "1095-SE",]
-redfox$detection_matrix <- redfox$detection_matrix[rownames(redfox$detection_matrix) != "1095-SE",]
-redfox$count_matrix <- redfox$count_matrix[rownames(redfox$count_matrix) != "1095-SE",]
-
-# filter covariates
-covariates_aligned <- covariates_aligned %>%
-  filter(location %in% common_sites) %>%
-  arrange(match(location, common_sites))
-
-# Which sites are duplicated?
-dup_sites <- covariates_aligned$location[duplicated(covariates_aligned$location)]
-dup_sites
-
-# Count how many times each site occurs
-table(covariates_aligned$location)
-
-covariates_unique <- covariates_aligned %>%
+covariates_unique <- covariates_unique %>%
   distinct(location, .keep_all = TRUE)
 
-identical(rownames(coyote$detection_matrix), covariates_unique$location)
-identical(rownames(lynx$detection_matrix), covariates_unique$location)
-identical(rownames(marten$detection_matrix), covariates_unique$location)
-identical(rownames(fisher$detection_matrix), covariates_unique$location)
-identical(rownames(redfox$detection_matrix), covariates_unique$location)
+stations_cov <- covariates_unique$location
+
+filter_mats <- function(mats, stations) {
+  mats$detection_matrix <- mats$detection_matrix[stations, , drop = FALSE]
+  mats$count_matrix     <- mats$count_matrix[stations, , drop = FALSE]
+  mats
+}
+
+coyote <- filter_mats(coyote, stations_cov)
+
+covariates_unique <- covariates_unique[match(rownames(coyote$detection_matrix),
+                                              covariates_unique$location), ]
 ```
 
 ##Dimension reduction of climate data
@@ -1107,23 +1142,62 @@ cor.test(covars$Latitude, covars$PC1)
 cor.test(covars$Latitude, covars$PC2)
 ```
 
+```{r}
+#Subset covariates for each region
+covars_boreal <- covars[
+  match(rownames(coyote_boreal$detection_matrix),
+        covars$location),
+  ,
+  drop = FALSE
+]
+
+covars_park <- covars[
+  match(rownames(coyote_park$detection_matrix),
+        covars$location),
+  ,
+  drop = FALSE
+]
+
+```
 
 #Write CSV files
 
 ```{r}
+#Covariates
 write.csv(covariates_unique, file = "data/ehscovars.csv", row.names = FALSE)
 write.csv(covars, file = "data/covars.csv", row.names = FALSE)
+write.csv(covars_boreal, file = "data/covars_boreal.csv", row.names = FALSE)
+write.csv(covars_park, file = "data/covars_park.csv", row.names = FALSE)
 
+#Coyote
 write.csv(coyote$detection_matrix, file = "data/coyotedetections.csv", row.names = FALSE)
-write.csv(lynx$detection_matrix, file = "data/lynxdetections.csv", row.names = FALSE)
-write.csv(marten$detection_matrix, file = "data/martendetections.csv", row.names = FALSE)
-write.csv(fisher$detection_matrix, file = "data/fisherdetections.csv", row.names = FALSE)
-write.csv(redfox$detection_matrix, file = "data/redfoxdetections.csv", row.names = FALSE)
-
 write.csv(coyote$count_matrix, file = "data/coyotecounts.csv", row.names = FALSE)
-write.csv(lynx$count_matrix, file = "data/lynxcounts.csv", row.names = FALSE)
-write.csv(marten$count_matrix, file = "data/martencounts.csv", row.names = FALSE)
-write.csv(fisher$count_matrix, file = "data/fishercounts.csv", row.names = FALSE)
-write.csv(redfox$count_matrix, file = "data/redfoxcounts.csv", row.names = FALSE)
+write.csv(coyote_boreal$detection_matrix, file = "data/coyotedetections_boeral.csv", row.names = FALSE)
+write.csv(coyote_boreal$count_matrix, file = "data/coyotecounts_boreal.csv", row.names = FALSE)
 
+#Red fox
+write.csv(redfox$detection_matrix, file = "data/redfoxdetections.csv", row.names = FALSE)
+write.csv(redfox$count_matrix, file = "data/redfoxcounts.csv", row.names = FALSE)
+write.csv(redfox_boreal$detection_matrix, file = "data/redfoxdetections_boreal.csv", row.names = FALSE)
+write.csv(redfox_park$count_matrix, file = "data/redfoxcounts_boreal.csv", row.names = FALSE)
+write.csv(redfox_boreal$detection_matrix, file = "data/redfoxdetections_park.csv", row.names = FALSE)
+write.csv(redfox_park$count_matrix, file = "data/redfoxcounts_park.csv", row.names = FALSE)
+
+#Lynx
+write.csv(lynx$detection_matrix, file = "data/lynxdetections.csv", row.names = FALSE)
+write.csv(lynx$count_matrix, file = "data/lynxcounts.csv", row.names = FALSE)
+write.csv(lynx_boreal$detection_matrix, file = "data/lynxdetections_boreal.csv", row.names = FALSE)
+write.csv(lynx_boreal$count_matrix, file = "data/lynxcounts_boreal.csv", row.names = FALSE)
+
+#Marten
+write.csv(marten$detection_matrix, file = "data/martendetections.csv", row.names = FALSE)
+write.csv(marten$count_matrix, file = "data/martencounts.csv", row.names = FALSE)
+write.csv(marten_boreal$detection_matrix, file = "data/martendetections_boreal.csv", row.names = FALSE)
+write.csv(marten_boreal$count_matrix, file = "data/martencounts_boreal.csv", row.names = FALSE)
+
+#Fisher
+write.csv(fisher$detection_matrix, file = "data/fisherdetections.csv", row.names = FALSE)
+write.csv(fisher$count_matrix, file = "data/fishercounts.csv", row.names = FALSE)
+write.csv(fisher_boreal$detection_matrix, file = "data/fisherdetections_boreal.csv", row.names = FALSE)
+write.csv(fisher_boreal$count_matrix, file = "data/fishercounts_boreal.csv", row.names = FALSE)
 ```
