@@ -36,17 +36,12 @@ library(ubms)
 library(spAbundance)
 library(spOccupancy)
 library(MCMCvis)
-library(forestplot)
 library(purrr)
 library(sjPlot)
 library(sjmisc)
 library(ggeffects)
 library(cmdstanr)
 
-```
-
-```{r}
-getwd()
 ```
 
 #Formatting count data
@@ -411,69 +406,6 @@ summary(lm_coyote)
 
 covars$coyote_resid <- resid(lm_coyote)
 cor.test(covars$coyote_resid, covars$hf)
-```
-
-#Coyote disaggregated human footprint
-```{r}
-#Linear features
-coyote_nmix_linear <- pcount(
-formula = ~ baited ~ 
-  PC1 * linear + PC2 * linear,
-data = umf_coyote,
-mixture = "P"
-)
-
-coyote_nmix_linear
-plotEffects(coyote_nmix_linear, "state", "PC1")
-plotEffects(coyote_nmix_linear, "state", "PC2")
-plotEffects(coyote_nmix_linear, "state", "linear")
-plotEffects(coyote_nmix_linear, "det", "baited")
-```
-```{r}
-#ABMI Linear features
-coyote_nmix_linearabmi <- pcount(
-formula = ~ baited ~ 
-  PC1 * scale(abmi_linear) + PC2 * scale(abmi_linear),
-data = umf_coyote,
-mixture = "P"
-)
-
-coyote_nmix_linearabmi
-plotEffects(coyote_nmix_linearabmi, "state", "PC1")
-plotEffects(coyote_nmix_linearabmi, "state", "PC2")
-plotEffects(coyote_nmix_linearabmi, "state", "abmi_linear")
-plotEffects(coyote_nmix_linearabmi, "det", "baited")
-```
-
-```{r}
-#Industry
-coyote_nmix_industrial <- pcount(
-formula = ~ baited ~ 
-  PC1 * industrial + PC2 * industrial,
-data = umf_coyote,
-mixture = "P"
-)
-
-coyote_nmix_industrial
-plotEffects(coyote_nmix_industrial, "state", "PC1")
-plotEffects(coyote_nmix_industrial, "state", "PC2")
-plotEffects(coyote_nmix_industrial, "state", "industrial")
-plotEffects(coyote_nmix_industrial, "det", "baited")
-```
-```{r}
-#Industry
-coyote_nmix_agriculture <- pcount(
-formula = ~ baited ~ 
-  PC1 * agriculture + PC2 * agriculture,
-data = umf_coyote,
-mixture = "P"
-)
-
-coyote_nmix_agriculture
-plotEffects(coyote_nmix_agriculture, "state", "PC1")
-plotEffects(coyote_nmix_agriculture, "state", "PC2")
-plotEffects(coyote_nmix_agriculture, "state", "agriculture")
-plotEffects(coyote_nmix_agriculture, "det", "baited")
 ```
 
 #Lynx nmix abundance in unmarked
@@ -948,6 +880,145 @@ fisher_pc2_plot
 ```
 
 #Custom N-mixture in Stan
+```{r}
+#Simulate data for model troubleshooting
+set.seed(123)
+
+# core design
+n_site    <- 150          # number of sites
+min_cam   <- 2
+max_cam   <- 4
+T         <- 10           # sampling occasions per camera
+
+# number of cameras per site (2–4)
+J_site <- sample(min_cam:max_cam, n_site, replace = TRUE)
+
+sum(J_site)  # total cameras
+
+# site-level covariates
+clim_pc1 <- rnorm(n_site, 0, 1)
+clim_pc2 <- rnorm(n_site, 0, 1)
+human_fp       <- rnorm(n_site, 0, 1)  # or runif if you prefer 0–1 scaling
+
+# build camera-level index
+site_id_cam <- rep(1:n_site, times = J_site)
+n_cam       <- length(site_id_cam)
+
+# baited vs non-baited at camera level (0/1)
+bait_cam <- rbinom(n_cam, size = 1, prob = 0.5)
+
+# abundance (lambda) model: log(lambda_i) = beta0 + beta1*pc1 + beta2*pc2 + beta3*hf
+beta0 <- 0.5
+beta1 <- 0.6
+beta2 <- -0.3
+beta3 <- 0.4
+
+beta_int1 <- 0.5   # NEW: interaction PC1 × HF
+beta_int2 <- -0.4  # NEW: interaction PC2 × HF
+
+phi_true <- 2.0
+psi_zero <- 0.15
+
+# detection model: logit(p_ijk) = alpha0 + alpha1*bait_cam_j
+alpha0 <- -1.2
+alpha1 <- 1.0
+
+sigma_cam <- 0.7
+u_cam <- rnorm(n_cam, 0, sigma_cam)
+
+eta_lambda <- beta0 +
+  beta1 * clim_pc1 +
+  beta2 * clim_pc2 +
+  beta3 * human_fp +
+  beta_int1 * clim_pc1 * human_fp +   # NEW
+  beta_int2 * clim_pc2 * human_fp     # NEW
+
+lambda_site <- exp(eta_lambda)
+
+is_zero <- rbinom(n_site, 1, psi_zero)
+
+N_nb <- rnbinom(n_site, size = phi_true, mu = lambda_site)
+
+N_site <- ifelse(is_zero == 1, 0, N_nb)
+summary(N_site)
+
+N_site <- rpois(n_site, lambda_site)
+summary(N_site)
+
+inv_logit <- function(x) 1 / (1 + exp(-x))
+
+eta_p_cam <- alpha0 + alpha1 * bait_cam + u_cam
+p_cam     <- inv_logit(eta_p_cam)
+
+max_J <- max(J_site)
+y <- array(NA_integer_, dim = c(n_site, max_J, T))
+
+cam_counter <- 1
+for (i in 1:n_site) {
+  Ji <- J_site[i]
+  Ni <- N_site[i]
+  
+  for (j in 1:Ji) {
+    p_ij <- p_cam[cam_counter]
+    y[i, j, ] <- rbinom(T, size = Ni, prob = p_ij)
+    cam_counter <- cam_counter + 1
+  }
+}
+
+bait_mat <- matrix(0, n_site, max_J)
+cam_counter <- 1
+for (i in 1:n_site) {
+  Ji <- J_site[i]
+  bait_mat[i, 1:Ji] <- bait_cam[cam_counter:(cam_counter + Ji - 1)]
+  cam_counter <- cam_counter + Ji
+}
+
+use_y <- ifelse(!is.na(y), 1L, 0L)
+
+y_fixed <- y
+y_fixed[is.na(y_fixed)] <- 0L
+
+
+stan_data <- list(
+  I        = n_site,
+  J        = J_site,
+  max_J    = max_J,
+  max_K    = T,
+  y        = y_fixed,
+  use_y    = use_y,
+  clim_pc1 = clim_pc1,
+  clim_pc2 = clim_pc2,
+  human_fp = human_fp,
+  baited   = bait_mat,
+  K        = max(N_site) + 20   # upper bound for N
+)
+
+
+```
+
+```{r}
+
+mod <- cmdstan_model(
+  "coyote_nmix.stan"
+)
+
+fit_test <- mod$sample(
+  data = stan_data,
+  chains = 2,
+  parallel_chains = 2,
+  iter_warmup = 200,
+  iter_sampling = 200,
+  adapt_delta = 0.99,
+  max_treedepth = 12,
+  refresh = 20
+)
+
+fit_test$diagnostic_summary()[, c("variable", "rhat", "ess_bulk", "ess_tail", "divergent__", "treedepth__")]
+
+
+```
+```
+
 ```{r}
 #Format data
 abund <- as.matrix(coyotecounts)   # cameras × occasions
