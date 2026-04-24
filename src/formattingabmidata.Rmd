@@ -322,7 +322,7 @@ det_with_region <- study_main_reports %>%
   left_join(covariates_fixed %>% select(location, region),
             by = "location")
 
-det_summary <- det_with_region %>%
+det_summary <- study_main_reports %>%
   count(species_common_name, region)
 
 ggplot(det_summary, aes(x = region, y = n, fill = species_common_name)) +
@@ -752,6 +752,12 @@ mult <- min(
 
 load_df[, c("PC1", "PC2")] <- load_df[, c("PC1", "PC2")] * mult
 
+#Compute complex hulls for region polygons
+hulls <- climate_sites %>%
+  group_by(region) %>%
+  slice(chull(PC1, PC2))   # convex hull for each region
+
+
 pc_plot <- autoplot(pca_res, data = climate_sites, color = "Latitude",
          loadings = TRUE, loadings.color = "black", 
          loadings.label = FALSE)+
@@ -762,7 +768,27 @@ pc_plot <- autoplot(pca_res, data = climate_sites, color = "Latitude",
   theme_classic() +
   theme(axis.title = element_text(size = 15))
 
+plot_data <- ggplot_build(pc_plot)$data[[1]]
+
+plot_data <- bind_cols(
+  climate_sites, 
+  plot_data[,c("x","y")] #autoplot-scaled PC1/PC2
+)
+
+hulls <- plot_data %>%
+  group_by(region) %>%
+  slice(chull(x, y))
+
+
 pc_plot + 
+  geom_polygon(
+    data = hulls,
+    aes(x = x, y = y, group = region, linetype = region),
+    fill = NA,
+    colour = "black",
+    linewidth = 0.5
+  ) +
+  scale_linetype_manual(values = c("solid", "dashed", "dotted")) +
   geom_text_repel(
     data = load_df,
     aes(x = PC1, y = PC2, label = label),
