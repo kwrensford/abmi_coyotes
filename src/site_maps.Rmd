@@ -105,7 +105,6 @@ map_hf <-
 #  legend.frame = FALSE,
 #  legend.text.size = 0.8,
 #  legend.title.size = 1
-)
 
 tmap_arrange(map_pc1, map_pc2, map_hf, ncol = 3)
 ```
