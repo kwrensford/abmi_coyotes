@@ -92,7 +92,7 @@ parameters {
   real alpha_p;
   real beta_bait;
 
-  vector[sum(J)] u_cam_raw;
+  vector[sum(J)] u_cam_raw; //Random intercept per site instead of camera? Levels of
   real<lower=0> sigma_cam;
 
   real<lower=1e-6> phi;
