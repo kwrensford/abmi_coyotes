@@ -73,6 +73,7 @@ covars_park <- read.csv("data/covars_park.csv")
 ```
 
 ```{r}
+#Scale data for all covariates
 covars$PC1<-scale(covars$PC1)
 covars$PC2<-scale(covars$PC2)
 covars$hf<-scale(covars$hf)
