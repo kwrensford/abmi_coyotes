@@ -422,27 +422,39 @@ camera_operation_matrix<-cameraOperation(camera_deployment_problems,
 
 collapse_sessions_fast <- function(camop_matrix) {
   
-  # Convert to data frame
   df <- as.data.frame(camop_matrix)
   
-  # Extract station names by removing the session suffix
+  # Extract station names
   stations <- sub("__SESS_.*$", "", rownames(df))
   
   # Split by station
   split_list <- split(df, stations)
   
-  # Collapse each station using max, but replace -Inf with 0
   collapsed <- lapply(split_list, function(x) {
+    
+    # Replace all-NA columns with 0 (station not deployed that year)
+    x[] <- lapply(x, function(col) {
+      if (all(is.na(col))) return(rep(0, length(col)))
+      return(col)
+    })
+    
+    # Collapse across years
     out <- apply(x, 2, max, na.rm = TRUE)
-    out[is.infinite(out)] <- 0   # replace -Inf with 0
+    
+    # Replace -Inf (shouldn't occur now) with 0
+    out[is.infinite(out)] <- 0
+    
     out
   })
   
-  # Bind back into a matrix
   out <- do.call(rbind, collapsed)
+  
+  # Reset rownames to station IDs
+  rownames(out) <- names(split_list)
   
   return(out)
 }
+
 
 camop_clean <- collapse_sessions_fast(camera_operation_matrix)
 
@@ -588,7 +600,7 @@ coyote$count_matrix
 
 redfox <- make_matrices(
   det_df = study_main_reports,
-  camop_df = camera_operation_matrix,
+  camop_df = camop_clean,
   species = "Red Fox"
 )
 
@@ -627,7 +639,7 @@ marten <- make_matrices(
 
 marten_boreal <- make_matrices(
   det_df = det_with_region,
-  camop_df = camera_operation_matrix,
+  camop_df = camop_clean,
   species = "Marten"
 )
   
@@ -1200,13 +1212,15 @@ write.csv(covars_park, file = "data/covars_park.csv", row.names = FALSE)
 write.csv(coyote$detection_matrix, file = "data/coyotedetections.csv", row.names = FALSE)
 write.csv(coyote$count_matrix, file = "data/coyotecounts.csv", row.names = FALSE)
 write.csv(coyote_boreal$detection_matrix, file = "data/coyotedetections_boeral.csv", row.names = FALSE)
+write.csv(coyote_park$detection_matrix, file = "data/coyotedetections_park.csv", row.names = FALSE)
 write.csv(coyote_boreal$count_matrix, file = "data/coyotecounts_boreal.csv", row.names = FALSE)
+write.csv(coyote_park$count_matrix, file = "data/coyotecounts_park.csv", row.names = FALSE)
 
 #Red fox
 write.csv(redfox$detection_matrix, file = "data/redfoxdetections.csv", row.names = FALSE)
 write.csv(redfox$count_matrix, file = "data/redfoxcounts.csv", row.names = FALSE)
 write.csv(redfox_boreal$detection_matrix, file = "data/redfoxdetections_boreal.csv", row.names = FALSE)
-write.csv(redfox_park$count_matrix, file = "data/redfoxcounts_boreal.csv", row.names = FALSE)
+write.csv(redfox_boreal$count_matrix, file = "data/redfoxcounts_boreal.csv", row.names = FALSE)
 write.csv(redfox_boreal$detection_matrix, file = "data/redfoxdetections_park.csv", row.names = FALSE)
 write.csv(redfox_park$count_matrix, file = "data/redfoxcounts_park.csv", row.names = FALSE)
 

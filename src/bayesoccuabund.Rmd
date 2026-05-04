@@ -42,6 +42,7 @@ library(jagsUI)
 #Formatting count data
 
 ```{r}
+getwd()
 
 coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
 coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts_boreal.csv"))
@@ -50,6 +51,7 @@ coyotecounts_park <- as.matrix(read.csv("data/coyotecounts_park.csv"))
 
 redfoxcounts <- as.matrix(read.csv("data/redfoxcounts.csv"))
 redfoxcounts_boreal <- as.matrix(read.csv("data/redfoxcounts_boreal.csv"))
+redfoxcounts_park <- as.matrix(read.csv("data/redfoxcounts_park.csv"))
 
 lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
 lynxcounts_boreal <- as.matrix(read.csv("data/lynxcounts_boreal.csv"))
@@ -395,134 +397,21 @@ ggplot(overlap_df, aes(sp1, sp2, fill = overlap_sites)) +
 ```
 
 
-
-##Frequentist N-mixture in unmarked
-```{r}
-umf_coyote <- unmarkedFramePCount(
-  y = coyotecounts,
-  siteCovs = covars
-)
-
-coyote_nmix <- pcount(
-formula = ~ bait + (1|camera) ~ 
-  PC1 * hf + PC2 * hf,
-data = umf_coyote,
-mixture = "P"
-)
-
-coyote_nmix
-plotEffects(coyote_nmix, "state", "PC1")
-plotEffects(coyote_nmix, "state", "PC2")
-plotEffects(coyote_nmix, "state", "hf")
-plotEffects(coyote_nmix, "det", "baited")
-
-coyote_lambda <- predict(coyote_nmix, type = "state")
-
-covars$coyote_abund <- coyote_lambda$Predicted
-
-lm_coyote <- lm(coyote_abund~hf, data = covars)
-summary(lm_coyote)
-
-covars$coyote_resid <- resid(lm_coyote)
-cor.test(covars$coyote_resid, covars$hf)
-```
-
-#Lynx nmix abundance in unmarked
-```{r}
-umf_lynx <- unmarkedFramePCount(
-  y = lynxcounts,
-  siteCovs = covars
-)
-
-lynx_nmix <- pcount(
-formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf + scale(coyote_resid),
-data = umf_lynx,
-mixture = "P"
-)
-
-lynx_nmix
-plotEffects(lynx_nmix, type = "state", covariate = "PC1")
-plotEffects(lynx_nmix, type = "state", covariate = "PC2")
-plotEffects(lynx_nmix, type = "state", covariate = "hf")
-plotEffects(lynx_nmix, type = "state", covariate = "coyote_resid")
-plotEffects(lynx_nmix, "det", "baited")
-
-```
-#Marten nmix abundance in unmarked
-```{r}
-umf_marten <- unmarkedFramePCount(
-  y = martencounts,
-  siteCovs = covars
-)
-
-marten_nmix <- pcount(
-formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf + scale(coyote_resid),
-data = umf_marten,
-mixture = "P"
-)
-
-marten_nmix
-plotEffects(marten_nmix, type = "state", covariate = "PC1")
-plotEffects(marten_nmix, type = "state", covariate = "PC2")
-plotEffects(marten_nmix, type = "state", covariate = "hf")
-plotEffects(marten_nmix, type = "state", covariate = "coyote_resid")
-plotEffects(marten_nmix, "det", "baited")
-```
-
-#Fisher nmix abundance in unmarked
-```{r}
-umf_fisher <- unmarkedFramePCount(
-  y = fishercounts,
-  siteCovs = covars
-)
-
-fisher_nmix <- pcount(
-formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf + coyote_resid,
-data = umf_fisher,
-mixture = "P"
-)
-
-fisher_nmix
-plotEffects(fisher_nmix, type = "state", covariate = "PC1")
-plotEffects(fisher_nmix, type = "state", covariate = "PC2")
-plotEffects(fisher_nmix, type = "state", covariate = "hf")
-plotEffects(fisher_nmix, type = "state", covariate = "coyote_resid")
-plotEffects(fisher_nmix, "det", "baited")
-```
-
-#Red Fox nmix abundance in unmarked
-```{r}
-umf_redfox <- unmarkedFramePCount(
-  y = redfoxcounts,
-  siteCovs = covars
-)
-
-redfox_nmix <- pcount(
-formula = ~ baited ~ 
-  PC1 * hf + PC2 * hf + coyote_resid,
-data = umf_redfox,
-mixture = "P"
-)
-
-redfox_nmix
-plotEffects(redfox_nmix, type = "state", covariate = "PC1")
-plotEffects(redfox_nmix, type = "state", covariate = "PC2")
-plotEffects(redfox_nmix, type = "state", covariate = "hf")
-plotEffects(redfox_nmix, type = "state", covariate = "coyote_resid")
-plotEffects(redfox_nmix, "det", "baited")
-
-```
-
 #Stan N-mixture using ubms
 ```{r}
-##Coyote
+##Coyote Boreal
+# number of sites and surveys
+n_sites <- nrow(coyotecounts_boreal)
+n_surveys <- ncol(coyotecounts_boreal)
+
+# convert each site covariate to observation-level
+boreal_bait <- matrix(rep(covars_boreal$baited, each = n_surveys), nrow = n_sites)
+boreal_cam <- matrix(rep(covars_boreal$location, each = n_surveys), nrow = n_sites)
+
 umf_coyote <- unmarkedFramePCount(
-  y = coyote_y,
-  siteCovs = site_covars,
-  obsCovs = list(bait = coyote_bait, camera = coyote_camid)
+  y = coyotecounts_boreal,
+  siteCovs = covars_boreal,
+  obsCovs = list(bait = boreal_bait, camera = boreal_cam)
 )
 
 coyote_nmix_ubms <- stan_pcount(formula =  ~ bait 
@@ -635,7 +524,7 @@ coyote_pc1_plot <- plot_interaction_ubms(
   focal = "PC1",
   moderator = "hf",
   species = "coyote",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC1",
   title = "Coyote abundance vs PC1 at low/high HF"
@@ -650,7 +539,7 @@ coyote_pc2_plot <- plot_interaction_ubms(
   focal = "PC2",
   moderator = "hf",
   species = "coyote",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC2",
   title = "Coyote abundance vs PC2 at low/high HF"
@@ -658,74 +547,184 @@ coyote_pc2_plot <- plot_interaction_ubms(
 
 coyote_pc2_plot
 ```
-
-##Red Fox
 ```{r}
-##Red Fox
-umf_redfox <- unmarkedFramePCount(
-  y = redfox_y,
-  siteCovs = site_covars,
-  obsCovs = list(bait = redfox_bait, camera = redfox_camid)
+##Coyote Park
+# number of sites and surveys
+n_sites_park <- nrow(coyotecounts_park)
+n_surveys_park <- ncol(coyotecounts_park)
+
+# convert each site covariate to observation-level
+park_bait <- matrix(rep(covars_park$baited, each = n_surveys_park), nrow = n_sites_park)
+park_cam <- matrix(rep(covars_park$location, each = n_surveys_park), nrow = n_sites_park)
+
+umf_coyote_park <- unmarkedFramePCount(
+  y = coyotecounts_park,
+  siteCovs = covars_park,
+  obsCovs = list(bait = park_bait, camera = park_cam)
 )
 
-redfox_nmix_stan <- stan_pcount(formula =  ~ bait
+coyote_nmix_ubms_park <- stan_pcount(formula =  ~ bait 
                                 ~ PC1 * hf + PC2 * hf,
-                     data = umf_redfox,
+                     data = umf_coyote_park,
                      chains = 3,
                      iter = 500,
                      cores = 3)
 
-redfox_nmix_stan
-plot_effects(redfox_nmix_stan, submodel = "state")
-plot_effects(redfox_nmix_stan, submodel = "det")
+coyote_nmix_ubms_park
+plot_effects(coyote_nmix_ubms_park, submodel = "state")
+plot_effects(coyote_nmix_ubms_park, submodel = "det")
 
-traceplot(redfox_nmix_stan, pars=c("beta_state", "beta_det"))
-plot_residuals(redfox_nmix_stan, submodel = "state", covariate = "hf")
 
-plot_posteriors(redfox_nmix_stan)
+traceplot(coyote_nmix_ubms_park, pars=c("beta_state", "beta_det"))
 
-redfox_gof<-gof(redfox_nmix_stan, draws=100)
-redfox_gof
-plot(redfox_gof)
+plot_posteriors(coyote_nmix_ubms_park)
+```
+```{r}
+coyote_pc1_plot_park <- plot_interaction_ubms(
+  model = coyote_nmix_ubms_park,
+  focal = "PC1",
+  moderator = "hf",
+  species = "coyote",
+  data = covars_boreal,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "Coyote abundance vs PC1 at low/high HF"
+)
+
+coyote_pc1_plot_park
+```
+```{r}
+coyote_pc2_plot_park <- plot_interaction_ubms(
+  model = coyote_nmix_ubms_park,
+  focal = "PC2",
+  moderator = "hf",
+  species = "coyote",
+  data = covars_boreal,
+  ylab = "Abundance",
+  xlab = "Climate PC2",
+  title = "Coyote abundance vs PC2 at low/high HF"
+)
+
+coyote_pc2_plot_park
+```
+
+##Red Fox
+```{r}
+##Red Fox
+umf_redfox_boreal <- unmarkedFramePCount(
+  y = redfoxcounts_boreal,
+  siteCovs = covars_boreal,
+  obsCovs = list(bait = boreal_bait, camera = boreal_cam)
+)
+
+redfox_nmix_stan_boreal <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
+                     data = umf_redfox_boreal,
+                     chains = 3,
+                     iter = 500,
+                     cores = 3)
+
+redfox_nmix_stan_boreal
+plot_effects(redfox_nmix_stan_boreal, submodel = "state")
+plot_effects(redfox_nmix_stan_boreal, submodel = "det")
+
+traceplot(redfox_nmix_stan_boreal, pars=c("beta_state", "beta_det"))
+plot_residuals(redfox_nmix_stan_boreal, submodel = "state", covariate = "hf")
+
+plot_posteriors(redfox_nmix_stan_boreal)
 ```
 
 ```{r}
-redfox_pc1_plot <- plot_interaction_ubms(
-  model = redfox_nmix_stan,
+redfox_pc1_plot_boreal <- plot_interaction_ubms(
+  model = redfox_nmix_stan_boreal,
   focal = "PC1",
   moderator = "hf",
   species = "red fox",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC1",
   title = "Red Fox abundance vs PC1 at low/high HF"
 )
 
-redfox_pc1_plot
+redfox_pc1_plot_boreal
 ```
 
 ```{r}
-redfox_pc2_plot <- plot_interaction_ubms(
-  model = redfox_nmix_stan,
+redfox_pc2_plot_boreal <- plot_interaction_ubms(
+  model = redfox_nmix_stan_boreal,
   focal = "PC2",
   moderator = "hf",
   species = "red fox",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC2",
   title = "Red Fox abundance vs PC2 at low/high HF"
 )
 
-redfox_pc2_plot
+redfox_pc2_plot_boreal
+```
+```{r}
+##Red Fox
+umf_redfox_park <- unmarkedFramePCount(
+  y = redfoxcounts_park,
+  siteCovs = covars_park,
+  obsCovs = list(bait = park_bait, camera = park_cam)
+)
+
+redfox_nmix_stan_park <- stan_pcount(formula =  ~ bait
+                                ~ PC1 * hf + PC2 * hf,
+                     data = umf_redfox_park,
+                     chains = 3,
+                     iter = 500,
+                     cores = 3)
+
+redfox_nmix_stan_park
+plot_effects(redfox_nmix_stan_park, submodel = "state")
+plot_effects(redfox_nmix_stan_park, submodel = "det")
+
+traceplot(redfox_nmix_stan_park, pars=c("beta_state", "beta_det"))
+plot_residuals(redfox_nmix_stan_park, submodel = "state", covariate = "hf")
+
+plot_posteriors(redfox_nmix_stan_park)
+```
+
+```{r}
+redfox_pc1_plot_park <- plot_interaction_ubms(
+  model = redfox_nmix_stan_park,
+  focal = "PC1",
+  moderator = "hf",
+  species = "red fox",
+  data = covars_park,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "Red Fox abundance vs PC1 at low/high HF"
+)
+
+redfox_pc1_plot_park
+```
+
+```{r}
+redfox_pc2_plot_park <- plot_interaction_ubms(
+  model = redfox_nmix_stan_park,
+  focal = "PC2",
+  moderator = "hf",
+  species = "red fox",
+  data = covars_park,
+  ylab = "Abundance",
+  xlab = "Climate PC1",
+  title = "Red Fox abundance vs PC2 at low/high HF"
+)
+
+redfox_pc2_plot_park
 ```
 
 #Lynx
 ```{r}
 ##Lynx
 umf_lynx <- unmarkedFramePCount(
-  y = lynx_y,
-  siteCovs = site_covars,
-  obsCovs = list(bait = lynx_bait, camera = lynx_camid)
+  y = lynxcounts_boreal,
+  siteCovs = covars_boreal,
+  obsCovs = list(bait = boreal_bait, camera = boreal_cam)
 )
 
 lynx_nmix_stan <- stan_pcount(formula =  ~ bait
@@ -754,7 +753,7 @@ lynx_pc1_plot <- plot_interaction_ubms(
   focal = "PC1",
   moderator = "hf",
   species = "lynx",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC1",
   title = "Lynx abundance vs PC1 at low/high HF"
@@ -769,7 +768,7 @@ lynx_pc2_plot <- plot_interaction_ubms(
   focal = "PC2",
   moderator = "hf",
   species = "lynx",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC2",
   title = "Lynx abundance vs PC2 at low/high HF"
@@ -782,9 +781,9 @@ lynx_pc2_plot
 ```{r}
 ##marten
 umf_marten <- unmarkedFramePCount(
-  y = marten_y,
-  siteCovs = site_covars,
-  obsCovs = list(bait = marten_bait, camera = marten_camid)
+  y = martencounts_boreal,
+  siteCovs = covars_boreal,
+  obsCovs = list(bait = boreal_bait, camera = boreal_cam)
 )
 
 marten_nmix_stan <- stan_pcount(formula =  ~ bait
@@ -1017,9 +1016,7 @@ stan_data <- list(
 
 ```{r}
 
-mod <- cmdstan_model(
-  "coyote_nmix.stan"
-)
+mod <- cmdstan_model("coyote_nmix.stan")
 
 fit_test <- mod$sample(
   data = stan_data,
