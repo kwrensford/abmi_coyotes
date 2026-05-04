@@ -640,7 +640,8 @@ marten <- make_matrices(
 marten_boreal <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
-  species = "Marten"
+  species = "Marten",
+  region = "Shield+Boreal"
 )
   
 fisher <- make_matrices(

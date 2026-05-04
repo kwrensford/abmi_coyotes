@@ -57,7 +57,7 @@ lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
 lynxcounts_boreal <- as.matrix(read.csv("data/lynxcounts_boreal.csv"))
 
 martencounts <- as.matrix(read.csv("data/martencounts.csv"))
-martencounts_boreal <- as.matrix(read.csv("data/martencounts.csv"))
+martencounts_boreal <- as.matrix(read.csv("data/martencounts_boreal.csv"))
 
 fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
 fishercounts_boreal <- as.matrix(read.csv("data/fishercounts_boreal.csv"))
@@ -813,7 +813,7 @@ marten_pc1_plot <- plot_interaction_ubms(
   focal = "PC1",
   moderator = "hf",
   species = "marten",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC1",
   title = "marten abundance vs PC1 at low/high HF"
@@ -828,7 +828,7 @@ marten_pc2_plot <- plot_interaction_ubms(
   focal = "PC2",
   moderator = "hf",
   species = "marten",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC2",
   title = "marten abundance vs PC2 at low/high HF"
@@ -841,9 +841,9 @@ marten_pc2_plot
 ```{r}
 ##Fisher
 umf_fisher <- unmarkedFramePCount(
-  y = fisher_y,
-  siteCovs = site_covars,
-  obsCovs = list(bait = fisher_bait, camera = fisher_camid)
+  y = fishercounts_boreal,
+  siteCovs = covars_boreal,
+  obsCovs = list(bait = boreal_bait, camera = boreal_cam)
 )
 
 fisher_nmix_stan <- stan_pcount(formula =  ~ bait
@@ -857,7 +857,7 @@ fisher_nmix_stan
 plot_effects(fisher_nmix_stan, submodel = "state")
 plot_effects(fisher_nmix_stan, submodel = "det")
 
-traceplot(fisher_nmix_stan, pars=c("beta_state", "beta_det"))
+ubms::traceplot(fisher_nmix_stan)
 plot_residuals(fisher_nmix_stan, submodel = "state", covariate = "hf")
 
 plot_posteriors(fisher_nmix_stan)
@@ -873,7 +873,7 @@ fisher_pc1_plot <- plot_interaction_ubms(
   focal = "PC1",
   moderator = "hf",
   species = "fisher",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC1",
   title = "fisher abundance vs PC1 at low/high HF"
@@ -888,7 +888,7 @@ fisher_pc2_plot <- plot_interaction_ubms(
   focal = "PC2",
   moderator = "hf",
   species = "fisher",
-  data = site_covars,
+  data = covars_boreal,
   ylab = "Abundance",
   xlab = "Climate PC2",
   title = "fisher abundance vs PC2 at low/high HF"
