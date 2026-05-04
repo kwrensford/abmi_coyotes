@@ -482,31 +482,32 @@ make_matrices <- function(det_df,
   # 2. Subset stations by region (for BOTH detections and camOp)
   #------------------------------------------------------------
   if (!is.null(region)) {
-    
-    # All stations in region (from metadata, not detections)
-    stations_region <- det_df %>%
-      filter(region == !!region) %>%
-      pull(location) %>%
-      unique()
-    
-    if (length(stations_region) == 0) {
-      stop(paste("Region", region, "has no stations in detection metadata"))
-    }
-    
-    # Subset camOp to ALL stations in region
-    camop_sub <- camop_df[rownames(camop_df) %in% stations_region, , drop = FALSE]
-    
-    if (nrow(camop_sub) == 0) {
-      stop("No matching stations in camOp for this region")
-    }
-    
-    # Subset detections to region (species already filtered)
-    det_species <- det_species %>% 
-      filter(location %in% stations_region)
-    
-  } else {
-    camop_sub <- camop_df
+  
+  # Use covariate metadata, not detections, to define region membership
+  stations_region <- covariates_fixed %>%
+    filter(region == !!region) %>%
+    pull(location) %>%
+    unique()
+  
+  if (length(stations_region) == 0) {
+    stop(paste("Region", region, "has no stations in covariate metadata"))
   }
+  
+  # Subset camOp
+  camop_sub <- camop_df[rownames(camop_df) %in% stations_region, , drop = FALSE]
+  
+  if (nrow(camop_sub) == 0) {
+    stop("No matching stations in camOp for this region")
+  }
+  
+  # Subset detections (species already filtered)
+  det_species <- det_species %>%
+    filter(location %in% stations_region)
+  
+} else {
+  camop_sub <- camop_df
+}
+
   
   #------------------------------------------------------------
   # 3. Detection history (binary)

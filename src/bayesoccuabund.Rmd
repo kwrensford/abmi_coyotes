@@ -44,12 +44,12 @@ library(jagsUI)
 ```{r}
 
 coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
-coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts.csv"))
+coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts_boreal.csv"))
 coyotecounts_park <- as.matrix(read.csv("data/coyotecounts_park.csv"))
 
 
 redfoxcounts <- as.matrix(read.csv("data/redfoxcounts.csv"))
-redfoxcounts <- as.matrix(read.csv("data/redfoxcounts_boreal.csv"))
+redfoxcounts_boreal <- as.matrix(read.csv("data/redfoxcounts_boreal.csv"))
 
 lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
 lynxcounts_boreal <- as.matrix(read.csv("data/lynxcounts_boreal.csv"))
@@ -68,7 +68,7 @@ fishercounts_boreal <- as.matrix(read.csv("data/fishercounts_boreal.csv"))
 
 ```{r}
 covars <- read.csv("data/covars.csv")
-covars_boreal <- read.csv("data/covars.boreal.csv")
+covars_boreal <- read.csv("data/covars_boreal.csv")
 covars_park <- read.csv("data/covars_park.csv")
 ```
 
