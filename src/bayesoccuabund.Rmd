@@ -797,7 +797,7 @@ marten_nmix_stan
 plot_effects(marten_nmix_stan, submodel = "state")
 plot_effects(marten_nmix_stan, submodel = "det")
 
-traceplot(marten_nmix_stan, pars=c("beta_state", "beta_det"))
+ubms::traceplot(marten_nmix_stan)
 plot_residuals(marten_nmix_stan, submodel = "state", covariate = "hf")
 
 plot_posteriors(marten_nmix_stan)
