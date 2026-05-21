@@ -1151,6 +1151,8 @@ fit_test <- mod_boreal$sample(
 
 fit_test
 
+MCMCtrace(fit_test)
+
 fit_test$diagnostic_summary()[, c("variable", "rhat", "ess_bulk", "ess_tail", "divergent__", "treedepth__")]
 
 
