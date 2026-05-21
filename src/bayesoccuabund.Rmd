@@ -42,7 +42,6 @@ library(jagsUI)
 #Formatting count data
 
 ```{r}
-getwd()
 
 coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
 coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts_boreal.csv"))
@@ -1033,15 +1032,15 @@ fit_test$diagnostic_summary()[, c("variable", "rhat", "ess_bulk", "ess_tail", "d
 
 
 ```
-```
+
 
 ```{r}
 #Format data
-abund <- as.matrix(coyotecounts)   # cameras × occasions
+abund <- as.matrix(coyotecounts_boreal)   # cameras × occasions
 K      <- ncol(abund)              # number of occasions
 
-site_id   <- covars$site           # site per camera
-sites     <- sort(unique(site_id))
+site_id   <- covars_boreal$site           # site per camera
+sites     <- unique(site_id)
 I         <- length(sites)         # number of sites
 
 # cameras per site
@@ -1064,15 +1063,15 @@ for (i in seq_along(sites)) {
   J_i       <- length(cams_i)
 
   # site-level covariates: same for all cameras at this site
-  clim_pc1[i] <- covars$PC1[cams_i[1]]
-  clim_pc2[i] <- covars$PC2[cams_i[1]]
-  human_fp[i] <- covars$hf[cams_i[1]]
+  clim_pc1[i] <- covars_boreal$PC1[cams_i[1]]
+  clim_pc2[i] <- covars_boreal$PC2[cams_i[1]]
+  human_fp[i] <- covars_boreal$hf[cams_i[1]]
 
   for (j in seq_len(J_i)) {
     row_idx <- cams_i[j]
 
     # camera-level detection covariate
-    baited_arr[i, j] <- as.integer(covars$baited[row_idx])
+    baited_arr[i, j] <- as.integer(covars_boreal$baited[row_idx])
 
     for (k in seq_len(max_K)) {
       val <- abund[row_idx, k]
@@ -1085,7 +1084,7 @@ for (i in seq_along(sites)) {
 }
 
 
-stan_data <- list(
+stan_data_boreal <- list(
   I       = I,
   J       = J,
   max_J   = max_J,
@@ -1102,16 +1101,17 @@ stan_data <- list(
 ```
 
 ```{r}
-mod <- cmdstan_model(
+mod_boreal <- cmdstan_model(
   "C:/Users/Gaynor Lab/Documents/abmi_coyotes/coyote_nmix.stan"
 )
 
-str(stan_data, max.level = 1)
+str(stan_data_boreal, max.level = 1)
 
-stan_data$J
+stan_data_boreal$J
 
 i <- 1
 j <- 1
+
 cbind(
   y      = stan_data$y[i, j, ],
   use_y  = stan_data$use_y[i, j, ]
@@ -1121,9 +1121,9 @@ head(stan_data$clim_pc1)
 head(stan_data$clim_pc2)
 head(stan_data$human_fp)
 
-stan_data$baited[1, 1:stan_data$J[2]]
+stan_data_boreal$baited[1, 1:stan_data$J[2]]
 
-stan_data$K
+stan_data_boreal$K
 ```
 ```{r}
 system.time(
@@ -1140,7 +1140,7 @@ system.time(
 ```
 
 ```{r}
-fit_test <- mod$sample(
+fit_test <- mod_boreal$sample(
   data = stan_data,
   chains = 1,
   parallel_chains = 1,

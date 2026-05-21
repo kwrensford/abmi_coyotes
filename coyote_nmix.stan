@@ -185,11 +185,6 @@ parameters {
   // OVERDISPERSION IN ABUNDANCE
   // =========================================================================
   real<lower=1e-6> phi;      // NegBinomial dispersion
-
-  // =========================================================================
-  // ZERO-INFLATION: STRUCTURAL ABSENCE
-  // =========================================================================
-  real logit_psi;            // logit probability of structural zero
 }
 
 transformed parameters {
@@ -225,48 +220,39 @@ model {
   // =========================================================================
   // PRIORS: ABUNDANCE PROCESS
   // =========================================================================
-  alpha_lambda ~ normal(0, 2);
-  beta_clim1   ~ normal(0, 2);
-  beta_clim2   ~ normal(0, 2);
-  beta_human   ~ normal(0, 2);
+  alpha_lambda   ~ normal(0, 2);
+  beta_clim1     ~ normal(0, 2);
+  beta_clim2     ~ normal(0, 2);
+  beta_human     ~ normal(0, 2);
   beta_interact1 ~ normal(0, 2);
   beta_interact2 ~ normal(0, 2);
 
   // =========================================================================
   // PRIORS: DETECTION PROCESS
   // =========================================================================
-  alpha_p ~ normal(0, 2);
+  alpha_p  ~ normal(0, 2);
   beta_bait ~ normal(0, 2);
 
   // =========================================================================
   // CAMERA-LEVEL RANDOM EFFECTS
   // =========================================================================
-  sigma_cam ~ exponential(1);
-  u_cam_raw ~ normal(0, 1);
+  sigma_cam  ~ exponential(1);
+  u_cam_raw  ~ normal(0, 1);
 
+  // Non-centered camera effects
+  // (already defined in transformed parameters as: u_cam = sigma_cam * u_cam_raw)
   // =========================================================================
-  // OVERDISPERSION IN ABUNDANCE
+  // OVERDISPERSION IN ABUNDANCE (NEGATIVE BINOMIAL)
   // =========================================================================
   phi ~ gamma(2, 0.5);
 
   // =========================================================================
-  // ZERO-INFLATION
-  // =========================================================================
-  logit_psi ~ normal(0, 2);
-
-  // Precompute zero-inflation log-probabilities
-  real log_psi1 = bernoulli_logit_lpmf(1 | logit_psi);
-  real log_psi0 = bernoulli_logit_lpmf(0 | logit_psi);
-
-  // =========================================================================
-  // LIKELIHOOD
+  // LIKELIHOOD: NEGATIVE BINOMIAL N-MIXTURE (NO ZERO-INFLATION)
   //
-  // For each site:
+  // For each site i:
   //   1. Compute log λ_i from covariates
   //   2. Build detection logits for all valid observations
-  //   3. Evaluate zero-inflated N‑mixture likelihood
-  //
-  // All heavy computation is now vectorized or precomputed.
+  //   3. Evaluate N‑mixture likelihood via nmix_site_lpmf()
   // =========================================================================
 
   {
@@ -279,16 +265,14 @@ model {
       // ----------------------------------------------------------------------
       real log_lambda_i =
         alpha_lambda
-        + beta_clim1 * clim_pc1[i]
-        + beta_clim2 * clim_pc2[i]
-        + beta_human * human_fp[i]
+        + beta_clim1     * clim_pc1[i]
+        + beta_clim2     * clim_pc2[i]
+        + beta_human     * human_fp[i]
         + beta_interact1 * clim_pc1[i] * human_fp[i]
         + beta_interact2 * clim_pc2[i] * human_fp[i];
 
       // ----------------------------------------------------------------------
-      // DETECTION LINEAR PREDICTORS
-      //
-      // Build a vector of detection logits for all valid observations at site i.
+      // DETECTION LINEAR PREDICTORS FOR ALL VALID OBSERVATIONS AT SITE i
       // ----------------------------------------------------------------------
       vector[n_obs_site[i]] logit_p_site;
       {
@@ -306,38 +290,22 @@ model {
       }
 
       // ----------------------------------------------------------------------
-      // ZERO-INFLATED N-MIXTURE LIKELIHOOD
+      // NEGATIVE BINOMIAL N-MIXTURE LIKELIHOOD (NO ZERO-INFLATION)
+      //
+      //   target += log ∑_N [ P(N | λ_i, φ) * ∏_m Binomial(y_im | N, p_im) ]
+      //
+      //   where N ranges from Kmin[i] (max observed count) to K (truncation).
       // ----------------------------------------------------------------------
-
-      if (Kmin[i] == 0) {
-
-        // Case: no detections → mixture of structural zero and ecological zero
-        target += log_sum_exp(
-          log_psi1,
-          log_psi0 +
-          nmix_site_lpmf(
-            segment(y_flat[i], start[i], len[i]) |
-            Kmin[i], K,
-            max_y_site[i],
-            log_lambda_i,
-            logit_p_site,
-            phi)
-        );
-
-      } else {
-
-        // Case: at least one detection → site cannot be structurally unoccupied
-        target +=
-          log_psi0 +
-          nmix_site_lpmf(
-            segment(y_flat[i], start[i], len[i]) |
-            Kmin[i], K,
-            max_y_site[i],
-            log_lambda_i,
-            logit_p_site,
-            phi);
-      }
+      target += nmix_site_lpmf(
+        segment(y_flat[i], start[i], len[i]) |
+        Kmin[i], K,
+        max_y_site[i],
+        log_lambda_i,
+        logit_p_site,
+        phi
+      );
     }
   }
 }
+
 
