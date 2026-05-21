@@ -1095,7 +1095,7 @@ stan_data_boreal <- list(
   clim_pc2 = clim_pc2,
   human_fp = human_fp,
   baited   = baited_arr,
-  K        = 100  # or some upper bound for N
+  K        = 30  # or some upper bound for N
 )
 
 ```
@@ -1146,10 +1146,10 @@ fit_test <- mod_boreal$sample(
   parallel_chains = 1,
   iter_warmup = 200,
   iter_sampling = 200,
-  adapt_delta = 0.99,
-  max_treedepth = 12,
   refresh = 20
 )
+
+fit_test
 
 fit_test$diagnostic_summary()[, c("variable", "rhat", "ess_bulk", "ess_tail", "divergent__", "treedepth__")]
 

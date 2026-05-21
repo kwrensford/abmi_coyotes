@@ -93,13 +93,16 @@ covars_park$baited <- as.numeric(covars_park$baited)
 
 ```{r}
 ggplot(covars, aes(PC1, fill = region))+
-  geom_histogram()
+  geom_histogram() + 
+  facet_wrap(~region)
 
 ggplot(covars, aes(PC2, fill = region))+
-  geom_histogram()
+  geom_histogram()+ 
+  facet_wrap(~region)
 
 ggplot(covars, aes(hf, fill = region))+
-  geom_histogram()
+  geom_histogram()+ 
+  facet_wrap(~region)
 ```
 
 #Custom N-mixture in Stan
