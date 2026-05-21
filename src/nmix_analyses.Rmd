@@ -50,6 +50,7 @@ coyotecounts_park <- as.matrix(read.csv("data/coyotecounts_park.csv"))
 
 redfoxcounts <- as.matrix(read.csv("data/redfoxcounts.csv"))
 redfoxcounts_boreal <- as.matrix(read.csv("data/redfoxcounts_boreal.csv"))
+redfoxcounts_park <- as.matrix(read.csv("data/redfoxcounts_park.csv"))
 
 lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
 lynxcounts_boreal <- as.matrix(read.csv("data/lynxcounts_boreal.csv"))
@@ -90,6 +91,16 @@ covars_park$hf<-scale(covars_park$hf)
 covars_park$baited <- as.numeric(covars_park$baited)
 ```
 
+```{r}
+ggplot(covars, aes(PC1, fill = region))+
+  geom_histogram()
+
+ggplot(covars, aes(PC2, fill = region))+
+  geom_histogram()
+
+ggplot(covars, aes(hf, fill = region))+
+  geom_histogram()
+```
 
 #Custom N-mixture in Stan
 ```{r}
