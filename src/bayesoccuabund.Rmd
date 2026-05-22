@@ -35,6 +35,7 @@ library(sjPlot)
 library(sjmisc)
 library(ggeffects)
 library(cmdstanr)
+library(bayesplot)
 library(rjags)
 library(jagsUI)
 ```
@@ -424,8 +425,9 @@ coyote_nmix_ubms
 plot_effects(coyote_nmix_ubms, submodel = "state")
 plot_effects(coyote_nmix_ubms, submodel = "det")
 
+mcmc_areas(as.matrix(coyote_nmix_ubms))
 
-traceplot(coyote_nmix_ubms, pars=c("beta_state", "beta_det"))
+traceplot(coyote_nmix_ubms)
 
 plot_posteriors(coyote_nmix_ubms)
 
