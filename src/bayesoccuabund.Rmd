@@ -408,30 +408,30 @@ n_surveys <- ncol(coyotecounts_boreal)
 boreal_bait <- matrix(rep(covars_boreal$baited, each = n_surveys), nrow = n_sites)
 boreal_cam <- matrix(rep(covars_boreal$location, each = n_surveys), nrow = n_sites)
 
-umf_coyote <- unmarkedFramePCount(
+umf_coyote_boreal <- unmarkedFramePCount(
   y = coyotecounts_boreal,
   siteCovs = covars_boreal,
   obsCovs = list(bait = boreal_bait, camera = boreal_cam)
 )
 
-coyote_nmix_ubms <- stan_pcount(formula =  ~ bait 
+coyote_nmix_ubms_boreal <- stan_pcount(formula =  ~ bait 
                                 ~ PC1 * hf + PC2 * hf,
-                     data = umf_coyote,
+                     data = umf_coyote_boreal,
                      chains = 3,
                      iter = 500,
                      cores = 3)
 
-coyote_nmix_ubms
-plot_effects(coyote_nmix_ubms, submodel = "state")
-plot_effects(coyote_nmix_ubms, submodel = "det")
+coyote_nmix_ubms_boreal
+plot_effects(coyote_nmix_ubms_boreal, submodel = "state")
+plot_effects(coyote_nmix_ubms_boreal, submodel = "det")
 
-mcmc_areas(as.matrix(coyote_nmix_ubms))
+mcmc_areas(as.matrix(coyote_nmix_ubms_boreal))
 
-traceplot(coyote_nmix_ubms)
+traceplot(coyote_nmix_ubms_boreal)
 
-plot_posteriors(coyote_nmix_ubms)
+plot_posteriors(coyote_nmix_ubms_boreal)
 
-coyote_gof<-gof(coyote_nmix_ubms, draws=100)
+coyote_gof<-gof(coyote_nmix_ubms_boreal, draws=100)
 coyote_gof
 plot(coyote_gof)
 ```
@@ -520,8 +520,8 @@ plot_interaction_ubms <- function(model,
 ```
 
 ```{r}
-coyote_pc1_plot <- plot_interaction_ubms(
-  model = coyote_nmix_ubms,
+coyote_boreal__pc1_plot <- plot_interaction_ubms(
+  model = coyote_nmix_ubms_boreal,
   focal = "PC1",
   moderator = "hf",
   species = "coyote",
@@ -531,12 +531,12 @@ coyote_pc1_plot <- plot_interaction_ubms(
   title = "Coyote abundance vs PC1 at low/high HF"
 )
 
-coyote_pc1_plot
+coyote_boreal_pc1_plot
 ```
 
 ```{r}
-coyote_pc2_plot <- plot_interaction_ubms(
-  model = coyote_nmix_ubms,
+coyote_boreal_pc2_plot <- plot_interaction_ubms(
+  model = coyote_nmix_ubms_boreal,
   focal = "PC2",
   moderator = "hf",
   species = "coyote",
@@ -546,8 +546,10 @@ coyote_pc2_plot <- plot_interaction_ubms(
   title = "Coyote abundance vs PC2 at low/high HF"
 )
 
-coyote_pc2_plot
+coyote_boreal_pc2_plot
+ggsave(filename = "boreal_coyote_pc1.pdf", coyote_boreal_pc2_plot, device = "pdf")
 ```
+
 ```{r}
 ##Coyote Park
 # number of sites and surveys
@@ -575,9 +577,6 @@ coyote_nmix_ubms_park
 plot_effects(coyote_nmix_ubms_park, submodel = "state")
 plot_effects(coyote_nmix_ubms_park, submodel = "det")
 
-
-traceplot(coyote_nmix_ubms_park, pars=c("beta_state", "beta_det"))
-
 plot_posteriors(coyote_nmix_ubms_park)
 ```
 ```{r}
@@ -593,6 +592,8 @@ coyote_pc1_plot_park <- plot_interaction_ubms(
 )
 
 coyote_pc1_plot_park
+ggsave(filename = "park_coyote_pc2.pdf", coyote_pc1_plot_park, device = "pdf")
+
 ```
 ```{r}
 coyote_pc2_plot_park <- plot_interaction_ubms(
@@ -761,6 +762,7 @@ lynx_pc1_plot <- plot_interaction_ubms(
 )
 
 lynx_pc1_plot
+ggsave(filename = "lynx_pc1.pdf", lynx_pc1_plot, device = "pdf")
 ```
 
 ```{r}
@@ -1166,10 +1168,13 @@ fit <- mod$sample(
   chains = 2,
   parallel_chains = 2,
   iter_warmup = 300,
-  iter_sampling = 300,
+  iter_sampling = 300, #Deirdre recommends 4 chains, 3000 warmup, 4000 sampling
   adapt_delta = 0.9,
   max_treedepth = 12,
   refresh = 50
 )
+
+#Plot prior and posterior distribution to see how well they line up
+
 
 ```

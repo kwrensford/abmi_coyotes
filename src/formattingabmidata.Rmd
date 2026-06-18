@@ -138,8 +138,8 @@ covariates_fixed <- check_coords %>%
   dplyr::select(-latitude_cam, -longitude_cam, -lat_mismatch, -lon_mismatch, -Lat, -Long)
 ```
 
-
 ##Independent detections
+
 ```{r}
 #Generate delta time (intervals between detection)
 study_intervals <- study_main_reports %>%
@@ -178,7 +178,6 @@ study_main_reports <- independent_events
 ```
 
 ##Latitudinal and Natural Region Partitioning
-
 
 ```{r}
 #Plotting camera locations by natural region
@@ -818,6 +817,7 @@ pc_plot +
 ```
 
 ##ABMI Linear Features
+
 ```{r}
 linear_abmi <- covariates_unique %>%
   dplyr::select(location, Latitude, Longitude, TransmissionLine_buf, Pipeline_buf, SeismicLineNarrow_buf, SeismicLineWide_buf)
@@ -825,7 +825,6 @@ linear_abmi <- covariates_unique %>%
 linear_abmi <- linear_abmi %>%
   mutate(abmi_linear = rowSums(.[4:7]))
 ```
-
 
 ##Canada Human Footprint index
 
@@ -913,6 +912,7 @@ covar_locations_hf <- bind_cols(covar_locations, hf_vals[,-1])
 ```
 
 ##Compiling Covariates into dataframe
+
 ```{r}
 ##Build covariate dataframe
 climate_sites <- climate_sites %>%
@@ -980,6 +980,7 @@ ggplot(long_covars, aes(x = value)) +
 ```
 
 #PC1 variation across province
+
 ```{r}
 sites_joined <- merge(sites_vect, coyote_covars, by = "location")
 
@@ -1015,7 +1016,9 @@ mapview(
   layer.name = "Human footprint"
 )
 ```
+
 Covariate variation across regions
+
 ```{r}
 
 # Basic theme
@@ -1166,6 +1169,7 @@ combined_counts
 ```
 
 #Covariate data exploration
+
 ```{r}
 #Correlation between human footprint and PC1
 cor.test(covars$PC1, covars$hf)
