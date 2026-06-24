@@ -33,6 +33,9 @@ library(exactextractr)
 library(xml2)
 library(geodata)
 library(viridis)
+library(ggspatial)
+library(tidyterra)
+library(arcgislayers)
 ```
 
 ##Load in covariate dataset with lat and long
@@ -44,12 +47,20 @@ covars_sf <- st_as_sf(
   coords = c("Longitude", "Latitude"),
   crs = 4326
 )
+
+covars_vect <- vect(covars_sf)
 ```
 
 ```{r}
 sf::st_is_valid(covars_sf)
 nrow(covars_sf)
 sf::st_geometry(covars_sf)
+
+url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
+
+canada <- gadm("Canada", level = 1, path = "data/")
+
+alberta <- canada[canada$NAME_1 == "Alberta", ]
 
 bbox <- alberta
 
@@ -60,7 +71,100 @@ hill <- terrain(elev, v = "slope", unit = "radians")
 aspect <- terrain(elev, v = "aspect", unit = "radians")
 hillshade <- shade(hill, aspect)
 hillshade_gray <- terra::app(hillshade, fun = mean)
+```
 
+```{r}
+#Download Alberta Bioregion data
+
+bioregion_url <- "https://geospatial.alberta.ca/titan/rest/services/biota/natural_subregions_alberta_2005/MapServer/0"
+
+layer <- arc_open(bioregion_url)
+bioregions <- arc_select(layer)
+
+#Transform natural region polygon to match cameras
+bioregions <- st_transform(bioregions, st_crs(covars_sf))
+
+#Join natural region polygons to camera data
+covars_with_region <- st_join(covars_sf, bioregions)
+
+names(bioregions)
+unique(bioregions$NRNAME)
+unique(bioregions$NSRNAME)
+
+#Grassland Parkland region polygon
+
+grass_park <- bioregions %>%
+  filter(NRNAME %in% c("Grassland", "Parkland") | 
+           NSRNAME == "Dry Mixedwoof"
+         )
+
+boreal_shield <- bioregions %>%
+  filter(
+    (NRNAME == "Boreal" & NSRNAME != "Dry Mixedwood") |
+      NRNAME == "Canadian Shield"
+  )
+
+#Dissolve each group into a single polygon
+grass_park_poly <- grass_park %>%
+  dplyr::summarise(geometry = st_union(geometry)) %>%
+  dplyr::mutate(region_group = "Grassland + Parkland")
+
+boreal_shield_poly <- boreal_shield %>%
+  dplyr::summarise(geometry = st_union(geometry)) %>%
+  dplyr::mutate(region_group = "Boreal + Shield")
+
+region_groups <- dplyr::bind_rows(grass_park_poly, boreal_shield_poly)
+
+
+```
+
+```{r}
+target_crs <- st_crs(covars_sf)
+
+hillshade <- terra::project(hillshade, target_crs$wkt)
+
+#Crop hillshade file to Alberta boundaries
+hillshade_crop <- crop(hillshade, bbox)
+hillshade_crop <- mask(hillshade_crop, bbox)
+
+# downsample by factor (e.g., 5 = 25× fewer cells)
+hillshade_small <- aggregate(hillshade_crop, fact = 5, fun = mean)
+
+hillshade_df <- as.data.frame(hillshade_small, xy = TRUE)
+names(hillshade_df) <- c("x", "y", "value")
+
+
+ggplot() +
+  geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+
+  geom_sf(data = region_groups,
+          aes(linetype = region_group),
+          fill = NA,
+          alpha = 0.25,
+          linewidth = 0.6) +
+  
+ scale_color_manual(values = c(
+    "Grassland + Parkland" = "#1b9e77",
+    "Boreal + Shield" = "#d95f02"
+  ), name = "Region Group") +
+  
+  geom_sf(data = covars_sf,
+          aes(color = hf),
+          size = 2,
+          alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "HF") +
+
+  coord_sf(expand = FALSE) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "right"
+  )
+```
+
+```{r}
 map_pc1 <- 
   tm_shape(hillshade_gray) + 
   tm_raster(palette = gray.colors(100), alpha = 0.5, legend.show = FALSE ) + 

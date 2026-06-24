@@ -727,6 +727,9 @@ covariates_climate <- covariates_unique %>%
 covar_locations <- covariates_climate %>%
   dplyr::select(location, Latitude, Longitude, region)
 
+covariates_climate <- covariates_climate %>%
+  filter(region != "Rocky+Foothills")
+
 ##Climate variables only
 climate_var <- covariates_climate %>%
     dplyr::select(-location, -Latitude, -Longitude, -region)
