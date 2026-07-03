@@ -796,7 +796,7 @@ hulls <- plot_data %>%
   slice(chull(x, y))
 
 
-pc_plot + 
+pc_plot <- plot + 
   geom_polygon(
     data = hulls,
     aes(x = x, y = y, group = region, linetype = region),
@@ -817,6 +817,8 @@ pc_plot +
     force = 3,
     max.overlaps = Inf
 )
+
+ggsave("data/pc_plot.png", pc_plot)
 ```
 
 ##ABMI Linear Features

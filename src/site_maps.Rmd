@@ -34,8 +34,12 @@ library(xml2)
 library(geodata)
 library(viridis)
 library(ggspatial)
-library(tidyterra)
 library(arcgislayers)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(grid)
+library(patchwork)
+library(cowplot)
 ```
 
 ##Load in covariate dataset with lat and long
@@ -52,24 +56,31 @@ covars_vect <- vect(covars_sf)
 ```
 
 ```{r}
+#Convert Covars into sf
 sf::st_is_valid(covars_sf)
 nrow(covars_sf)
 sf::st_geometry(covars_sf)
 
-url <- "https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0"
+#Download alberta boundaries
+alberta <- arc_open("https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0") %>%
+  arc_select() %>%
+  st_as_sf()
 
-canada <- gadm("Canada", level = 1, path = "data/")
+alberta <- alberta %>% 
+  dplyr::summarise(geometry = st_union(geometry))
 
-alberta <- canada[canada$NAME_1 == "Alberta", ]
+alberta <- st_transform(alberta, crs = 4326)
 
-bbox <- alberta
-
+#Download elevation raster
 elev <- get_elev_raster(locations = covars_sf, z = 10, clip = "bbox")
 elev <- rast(elev)
 
+#Get hillshade data
 hill <- terrain(elev, v = "slope", unit = "radians")
 aspect <- terrain(elev, v = "aspect", unit = "radians")
 hillshade <- shade(hill, aspect)
+hillshade_4326 <- terra::project(hillshade, "EPSG:4326")
+hillshade <- hillshade_4326
 hillshade_gray <- terra::app(hillshade, fun = mean)
 ```
 
@@ -91,14 +102,16 @@ names(bioregions)
 unique(bioregions$NRNAME)
 unique(bioregions$NSRNAME)
 
+bioregions_clipped <- st_intersection(bioregions, alberta)
+
 #Grassland Parkland region polygon
 
-grass_park <- bioregions %>%
+grass_park <- bioregions_clipped %>%
   filter(NRNAME %in% c("Grassland", "Parkland") | 
            NSRNAME == "Dry Mixedwoof"
          )
 
-boreal_shield <- bioregions %>%
+boreal_shield <- bioregions_clipped %>%
   filter(
     (NRNAME == "Boreal" & NSRNAME != "Dry Mixedwood") |
       NRNAME == "Canadian Shield"
@@ -107,34 +120,44 @@ boreal_shield <- bioregions %>%
 #Dissolve each group into a single polygon
 grass_park_poly <- grass_park %>%
   dplyr::summarise(geometry = st_union(geometry)) %>%
-  dplyr::mutate(region_group = "Grassland + Parkland")
+  dplyr::mutate(region_group = "Grassland & Parkland")
 
 boreal_shield_poly <- boreal_shield %>%
   dplyr::summarise(geometry = st_union(geometry)) %>%
-  dplyr::mutate(region_group = "Boreal + Shield")
+  dplyr::mutate(region_group = "Boreal & Shield")
 
 region_groups <- dplyr::bind_rows(grass_park_poly, boreal_shield_poly)
 
+region_groups <- st_intersection(region_groups, alberta)
 
 ```
 
 ```{r}
-target_crs <- st_crs(covars_sf)
 
-hillshade <- terra::project(hillshade, target_crs$wkt)
+#target_crs <- st_crs(covars_sf)
+
+#hillshade <- terra::project(hillshade, target_crs$wkt)
+
+#Convert alberta boundaries from spat vector to sf object
+alberta_vect <- vect(alberta)
+bbox <- alberta_vect
 
 #Crop hillshade file to Alberta boundaries
-hillshade_crop <- crop(hillshade, bbox)
-hillshade_crop <- mask(hillshade_crop, bbox)
+hillshade_crop <- crop(hillshade, alberta)
+hillshade_crop <- mask(hillshade_crop, alberta)
 
 # downsample by factor (e.g., 5 = 25× fewer cells)
 hillshade_small <- aggregate(hillshade_crop, fact = 5, fun = mean)
 
 hillshade_df <- as.data.frame(hillshade_small, xy = TRUE)
 names(hillshade_df) <- c("x", "y", "value")
+```
 
 
-ggplot() +
+
+```{r}
+#Climate PC1
+p_pc1 <- ggplot() +
   geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
   scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
 
@@ -144,10 +167,63 @@ ggplot() +
           alpha = 0.25,
           linewidth = 0.6) +
   
- scale_color_manual(values = c(
-    "Grassland + Parkland" = "#1b9e77",
-    "Boreal + Shield" = "#d95f02"
-  ), name = "Region Group") +
+  geom_sf(data = covars_sf,
+          aes(color = PC1),
+          size = 2,
+          alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC1 (Overerall Climate)" ) +
+
+  coord_sf(expand = FALSE) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "right"
+  ) +
+  
+  annotation_scale(
+  location = "bl",
+  width_hint = 0.3,
+  text_cex = 0.8,
+  bar_cols = c("grey20", "white")
+)
+
+
+#Climate PC2
+p_pc2 <- ggplot() +
+  geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+
+  geom_sf(data = region_groups,
+          aes(linetype = region_group),
+          fill = NA,
+          alpha = 0.25,
+          linewidth = 0.6) +
+  
+  geom_sf(data = covars_sf,
+          aes(color = PC2),
+          size = 2,
+          alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC2 (Aridity)") +
+
+  coord_sf(expand = FALSE) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "right"
+  )
+
+#Climate HF
+p_hf <- ggplot() +
+  geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+
+  geom_sf(data = region_groups,
+          aes(linetype = region_group),
+          fill = NA,
+          alpha = 0.25,
+          linewidth = 0.6) +
   
   geom_sf(data = covars_sf,
           aes(color = hf),
@@ -162,53 +238,90 @@ ggplot() +
     axis.title = element_blank(),
     legend.position = "right"
   )
+
+ggsave("data/hf.png", p_hf, width = 6, height = 6, dpi = 300)
+ggsave("data/pc1.png", p_pc1, width = 6, height = 6, dpi = 300)
+ggsave("data/pc2.png", p_pc2, width = 6, height = 6, dpi = 300)
+
 ```
 
 ```{r}
-map_pc1 <- 
-  tm_shape(hillshade_gray) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.5, legend.show = FALSE ) + 
-  tm_shape(elev) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.4, legend.show = FALSE ) + 
-  tm_shape(covars_sf) + 
-  tm_dots(col = "PC1", palette = "viridis", size = 0.5, style = "cont") +
-  tm_layout(
-  legend.outside = TRUE,
-  legend.outside.position = "right",
-  legend.frame = FALSE,
-  legend.text.size = 0.8,
-  legend.title.size = 1
-)
+
+#North America Outline
+na <- ne_countries(continent = "North America", returnclass = "sf")
+
+#Create inset map
+inset_map <- ggplot() +
+  geom_sf(data = na, fill = "grey90", color = "white") +
+  geom_sf(data = alberta_sf, fill = "red", alpha = 0.7) +
+  theme_void()
+
+ggsave("data/inset.png", inset_map, width = 3, height = 3, dpi = 300)
+
+inset_grob <- ggplotGrob(inset_map)
 
 
-map_pc2 <- 
-  tm_shape(hillshade_gray) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.5) + 
-  tm_shape(elev) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.4) + 
-  tm_shape(covars_sf) + 
-  tm_dots(col = "PC2", palette = "viridis", size = 0.5, style = "cont") +
-  tm_layout(
-  legend.outside = TRUE,
-  legend.outside.position = "right",
-  legend.frame = FALSE,
-  legend.text.size = 0.8,
-  legend.title.size = 1
-)
+#Combine Maps
+combined <- plot_grid(p_hf, p_pc1, p_pc2, inset_map, align = "vh")
+```
 
-map_hf <- 
-  tm_shape(hillshade_gray) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.5, fill.legend = tm_legend_hide()) +
-  tm_shape(elev) + 
-  tm_raster(palette = gray.colors(100), alpha = 0.4, fill.legend = tm_legend_hide()) +
-  tm_shape(covars_sf) + 
-  tm_dots(col = "hf", palette = "viridis", size = 0.5, style = "cont") #+
-#  tm_layout(
-#  legend.outside = TRUE,
-#  legend.outside.position = "right",
-#  legend.frame = FALSE,
-#  legend.text.size = 0.8,
-#  legend.title.size = 1
+```{r}
+#Faceted covariate map
 
-tmap_arrange(map_pc1, map_pc2, map_hf, ncol = 3)
+#Create a long dataset for faceting
+coords <- st_coordinates(covars_sf)
+
+covars_df <- covars_sf %>%
+  st_drop_geometry() %>%
+  bind_cols(coords)
+
+covars_long <- covars_df %>%
+  pivot_longer(
+    cols = c(hf, PC1, PC2),
+    names_to = "covariate",
+    values_to = "value"
+  )
+
+covars_long <- st_as_sf(covars_long, coords = c("X", "Y"), crs = 4326)
+
+
+p <- ggplot() +
+  geom_raster(data = hillshade_df,
+              aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+
+  geom_sf(data = region_groups,
+          aes(linetype = region_group),
+          fill = NA,
+          color = "black",
+          linewidth = 0.6,
+          alpha = 0.4) +
+
+  geom_sf(data = covars_long,
+          aes(color = value),
+          size = 1.5,
+          alpha = 0.9) +
+  scale_color_viridis_c(option = "magma") +
+
+  facet_wrap(~ covariate, ncol = 3) +
+
+  coord_sf(expand = FALSE) +
+
+  annotation_scale(location = "bl", width_hint = 0.3) +
+
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "right",
+    strip.text = element_text(size = 12, face = "bold")
+  )
+
+p + annotation_custom(
+      grob = ggplotGrob(inset_map),
+      xmin = -117, xmax = -112,
+      ymin = 59, ymax = 62
+    )
+
+
 ```
