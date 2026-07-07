@@ -35,9 +35,11 @@ library(sjPlot)
 library(sjmisc)
 library(ggeffects)
 library(cmdstanr)
-library(bayesplot)
-library(rjags)
-library(jagsUI)
+library(ggimage)
+library(cowplot)
+library(patchwork)
+library(grid)
+library(magick)
 ```
 
 #Formatting count data
@@ -91,310 +93,6 @@ covars_park$hf<-scale(covars_park$hf)
 covars_park$baited <- as.numeric(covars_park$baited)
 ```
 
-#Formatting count data into one row per site
-```{r}
-
-site_covars <- covars %>%
-  group_by(site) %>%
-  slice(1) %>%   # keep the first camera per site
-  ungroup()
-
-
-make_site_level_mats <- function(Y, covars, occ_prefix = "o") {
-  library(dplyr)
-  library(tidyr)
-  library(stringr)
-  
-  ### ---------------------------------------------------------
-  ### 0. Fix duplicated occasion names BEFORE tibble conversion
-  ### ---------------------------------------------------------
-  
-  # Extract original occasion columns
-  occ_cols <- grep(paste0("^", occ_prefix), colnames(Y), value = TRUE)
-  
-  # Count how many times each base name appears
-  occ_base <- sub(paste0("^", occ_prefix), "", occ_cols)
-  K <- length(unique(occ_base))          # occasions per year
-  total_K <- length(occ_cols)            # total columns
-  n_years <- total_K / K                 # infer number of years
-  
-  if (total_K %% K != 0) {
-    stop("Occasion columns do not divide evenly into years. Check your matrix.")
-  }
-  
-  # Build new unique names: y1_o1, y1_o2, ..., y2_o1, y2_o2, ...
-  year_index <- rep(seq_len(n_years), each = K)
-  occ_index  <- rep(seq_len(K), times = n_years)
-  
-  new_names <- paste0("y", year_index, "_o", occ_index)
-  
-  # Apply new names BEFORE tibble conversion
-  colnames(Y)[colnames(Y) %in% occ_cols] <- new_names
-  
-  ### ---------------------------------------------------------
-  ### 1. Now safely convert to tibble
-  ### ---------------------------------------------------------
-  Y <- as_tibble(Y)
-  covars <- as_tibble(covars)
-  
-  ### ---------------------------------------------------------
-  ### 2. Standardize covariate names
-  ### ---------------------------------------------------------
-  covars_std <- covars %>%
-    rename(
-      camera = location,
-      site   = site,
-      baited = baited
-    )
-  
-  ### ---------------------------------------------------------
-  ### 3. Build long-format table
-  ### ---------------------------------------------------------
-  dat_long <- Y %>%
-    mutate(
-      camera = covars_std$camera,
-      site   = covars_std$site
-    ) %>%
-    pivot_longer(
-      cols = all_of(new_names),
-      names_to = "occ_full",
-      values_to = "count"
-    ) %>%
-    filter(!is.na(count)) %>%
-    mutate(
-      year = as.integer(str_extract(occ_full, "(?<=y)\\d+(?=_)")),
-      occ  = as.integer(str_extract(occ_full, "(?<=_o)\\d+"))
-    ) %>%
-    arrange(site, camera, year, occ) %>%
-    group_by(site) %>%
-    mutate(rep_id = row_number()) %>%
-    ungroup()
-  
-  ### ---------------------------------------------------------
-  ### 4. Add baited status
-  ### ---------------------------------------------------------
-  bait_df <- covars_std %>% dplyr::select(site, camera, baited)
-  
-  dat_long <- dat_long %>%
-    left_join(bait_df, by = c("site", "camera"))
-  
-  ### ---------------------------------------------------------
-  ### 5. Build wide matrices
-  ### ---------------------------------------------------------
-  
-  # Count matrix
-  y_wide <- dat_long %>%
-    dplyr::select(site, rep_id, count) %>%
-    pivot_wider(names_from = rep_id, values_from = count) %>%
-    arrange(site)
-  
-  y_mat <- as.matrix(y_wide[,-1])
-  rownames(y_mat) <- y_wide$site
-  
-  # Bait matrix
-  bait_wide <- dat_long %>%
-    dplyr::select(site, rep_id, baited) %>%
-    pivot_wider(names_from = rep_id, values_from = baited) %>%
-    arrange(site)
-  
-  bait_mat <- as.matrix(bait_wide[,-1])
-  rownames(bait_mat) <- bait_wide$site
-  
-  # Camera ID matrix
-  cam_wide <- dat_long %>%
-    dplyr::select(site, rep_id, camera) %>%
-    pivot_wider(names_from = rep_id, values_from = camera) %>%
-    arrange(site)
-  
-  cam_mat <- as.matrix(cam_wide[,-1])
-  rownames(cam_mat) <- cam_wide$site
-  
-  ### ---------------------------------------------------------
-  ### Return everything
-  ### ---------------------------------------------------------
-  list(
-    y_mat = y_mat,
-    bait_mat = bait_mat,
-    cam_mat = cam_mat,
-    dat_long = dat_long,
-    K = K,
-    n_years = n_years
-  )
-}
-```
-
-```{r}
-##Coyote data
-coyote_out <- make_site_level_mats(
-  Y = coyotecounts,
-  covars = covars
-)
-
-coyote_y     <- coyote_out$y_mat
-coyote_bait  <- coyote_out$bait_mat
-coyote_camid <- coyote_out$cam_mat
-
-##Red Fox
-redfox_out <- make_site_level_mats(
-  Y = redfoxcounts,
-  covars = covars
-)
-
-redfox_y     <- redfox_out$y_mat
-redfox_bait  <- redfox_out$bait_mat
-redfox_camid <- redfox_out$cam_mat
-
-##Lynx
-lynx_out <- make_site_level_mats(
-  Y = lynxcounts,
-  covars = covars
-)
-
-lynx_y     <- lynx_out$y_mat
-lynx_bait  <- lynx_out$bait_mat
-lynx_camid <- lynx_out$cam_mat
-
-##Martenlynx
-marten_out <- make_site_level_mats(
-  Y = martencounts,
-  covars = covars
-)
-
-marten_y     <- marten_out$y_mat
-marten_bait  <- marten_out$bait_mat
-marten_camid <- marten_out$cam_mat
-
-##Fisher
-fisher_out <- make_site_level_mats(
-  Y = fishercounts,
-  covars = covars
-)
-
-fisher_y     <- fisher_out$y_mat
-fisher_bait  <- fisher_out$bait_mat
-fisher_camid <- fisher_out$cam_mat
-```
-
-#Visualizing overlap
-```{r}
-count_list <- list(
-  coyote = coyotecounts,
-  lynx   = lynxcounts,
-  marten = martencounts,
-  fisher = fishercounts,
-  redfox = redfoxcounts
-)
-
-site_id <- covars$location
-
-sites_species <- c(
-  coyote = sum(rowSums(coyotecounts, na.rm = TRUE) > 0),
-  lynx   = sum(rowSums(lynxcounts, na.rm = TRUE) > 0),
-  marten = sum(rowSums(martencounts, na.rm = TRUE) > 0),
-  fisher = sum(rowSums(fishercounts, na.rm = TRUE) > 0),
-  redfox = sum(rowSums(fishercounts, na.rm = TRUE) > 0)
-)
-
-site_counts <- map_df(names(count_list), function(sp) {
-  mat <- count_list[[sp]]
-  data.frame(
-    site = site_id,
-    species = sp,
-    detections = rowSums(mat, na.rm = TRUE)
-  )
-})
-
-ggplot(site_counts, aes(x = site, y = detections)) +
-  geom_col() +
-  facet_wrap(~ species, scales = "free_y") +
-  theme_bw() +
-  labs(
-    title = "Detections per Site for Each Species",
-    x = "Site ID",
-    y = "Total Detections"
-  )
-```
-
-```{r}
-presence_list <- lapply(count_list, function(mat) {
-  as.numeric(rowSums(mat, na.rm = TRUE) > 0)
-})
-
-presence_df <- data.frame(
-  site = site_id,
-  coyote = presence_list$coyote,
-  lynx   = presence_list$lynx,
-  marten   = presence_list$marten,
-  fisher = presence_list$fisher,
-  redfox = presence_list$redfox
-)
-
-# get species names
-sp <- names(count_list)
-
-# function to count sites where sp occurs alone
-alone_counts <- sapply(sp, function(s) {
-  this_present  <- presence_df[[s]] == 1
-  others_absent <- rowSums(presence_df[sp[sp != s]]) == 0
-  sum(this_present & others_absent)
-})
-
-alone_counts
-
-pairwise_counts <- function(matA, matB, spA, spB) {
-
-  A_present <- rowSums(matA, na.rm =TRUE) > 0
-  B_present <- rowSums(matB, na.rm =TRUE) > 0
-
-  data.frame(
-    sp1 = spA,
-    sp2 = spB,
-    both_present = sum(A_present & B_present),
-    only_sp1     = sum(A_present & !B_present),
-    only_sp2     = sum(!A_present & B_present)
-  )
-}
-
-out1 <- pairwise_counts(coyotecounts, lynxcounts,   "coyote", "lynx")
-out2 <- pairwise_counts(coyotecounts, martencounts, "coyote", "marten")
-out3 <- pairwise_counts(coyotecounts, fishercounts, "coyote", "fisher")
-out4 <- pairwise_counts(coyotecounts, redfoxcounts, "coyote", "redfox")
-out5 <- pairwise_counts(lynxcounts,   martencounts, "lynx",   "marten")
-out6 <- pairwise_counts(lynxcounts,   fishercounts, "lynx",   "fisher")
-out7 <- pairwise_counts(lynxcounts,   fishercounts, "lynx",   "redfox")
-out8 <- pairwise_counts(martencounts, fishercounts, "marten", "fisher")
-out9 <- pairwise_counts(martencounts, fishercounts, "marten", "redfox")
-out10 <- pairwise_counts(martencounts, fishercounts, "fisher", "redfox")
-
-pairwise_summary <- rbind(out1, out2, out3, out4, out5, out6, out7, out8, out9, out10)
-pairwise_summary
-
-```
-
-```{r}
-species <- names(count_list)
-
-pairs <- t(combn(species, 2))
-colnames(pairs) <- c("sp1", "sp2")
-
-overlap_results <- apply(pairs, 1, function(sp) {
-  sum(presence_df[[sp[1]]] == 1 & presence_df[[sp[2]]] == 1)
-})
-
-overlap_df <- data.frame(
-  sp1 = pairs[,1],
-  sp2 = pairs[,2],
-  overlap_sites = overlap_results
-)
-
-ggplot(overlap_df, aes(sp1, sp2, fill = overlap_sites)) +
-  geom_tile() +
-  geom_text(aes(label = overlap_sites)) +
-  scale_fill_viridis_c() +
-  theme_minimal() +
-  labs(title = "Site Overlap Between Species")
-
-```
 
 
 #Stan N-mixture using ubms
@@ -422,10 +120,12 @@ coyote_nmix_ubms_boreal <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 coyote_nmix_ubms_boreal
+
+saveRDS(coyote_nmix_ubms_boreal, file = "coyote_nmix_ubms_boreal.rds")
+
 plot_effects(coyote_nmix_ubms_boreal, submodel = "state")
 plot_effects(coyote_nmix_ubms_boreal, submodel = "det")
 
-mcmc_areas(as.matrix(coyote_nmix_ubms_boreal))
 
 traceplot(coyote_nmix_ubms_boreal)
 
@@ -433,7 +133,6 @@ plot_posteriors(coyote_nmix_ubms_boreal)
 
 coyote_gof<-gof(coyote_nmix_ubms_boreal, draws=100)
 coyote_gof
-plot(coyote_gof)
 ```
 
 ```{r}
@@ -468,7 +167,8 @@ plot_interaction_ubms <- function(model,
     grid[[moderator]] <- mod_value
     
     # Fix all other covariates at their means
-    other_covs <- setdiff(names(data), c(focal, moderator))
+    numeric_covs <- names(data)[sapply(data, is.numeric)]
+other_covs <- setdiff(numeric_covs, c(focal, moderator))
     for (v in other_covs) {
       grid[[v]] <- mean(data[[v]], na.rm = TRUE)
     }
@@ -503,7 +203,7 @@ plot_interaction_ubms <- function(model,
   # 5. Labels
   if (is.null(ylab)) ylab <- paste("Predicted", species)
   if (is.null(xlab)) xlab <- focal
-  if (is.null(title)) title <- paste("Effect of", focal, "x", moderator)
+  #if (is.null(title)) title <- paste("Effect of", focal, "x", moderator)
   
   # 6. Plot
   library(ggplot2)
@@ -515,9 +215,11 @@ plot_interaction_ubms <- function(model,
                 fill = col_high, alpha = 0.2) +
     geom_line(aes(y = pred_hi), color = col_high, linewidth = 1) +
     labs(y = ylab, x = xlab, title = title) +
-    theme_classic()
+    theme_classic() + 
+    theme(legend.position = "none")
 }
 ```
+
 
 ```{r}
 coyote_boreal__pc1_plot <- plot_interaction_ubms(
@@ -574,6 +276,9 @@ coyote_nmix_ubms_park <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 coyote_nmix_ubms_park
+
+saveRDS(coyote_nmix_ubms_park, file = "coyote_nmix_ubms_park.rds")
+
 plot_effects(coyote_nmix_ubms_park, submodel = "state")
 plot_effects(coyote_nmix_ubms_park, submodel = "det")
 
@@ -627,6 +332,10 @@ redfox_nmix_stan_boreal <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 redfox_nmix_stan_boreal
+
+saveRDS(redfox_nmix_stan_boreal, file = "redfox_nmix_stan_boreal.rds")
+
+
 plot_effects(redfox_nmix_stan_boreal, submodel = "state")
 plot_effects(redfox_nmix_stan_boreal, submodel = "det")
 
@@ -665,6 +374,7 @@ redfox_pc2_plot_boreal <- plot_interaction_ubms(
 
 redfox_pc2_plot_boreal
 ```
+
 ```{r}
 ##Red Fox
 umf_redfox_park <- unmarkedFramePCount(
@@ -681,6 +391,9 @@ redfox_nmix_stan_park <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 redfox_nmix_stan_park
+
+saveRDS(redfox_nmix_stan_park, file = "redfox_nmix_stan_park.rds")
+
 plot_effects(redfox_nmix_stan_park, submodel = "state")
 plot_effects(redfox_nmix_stan_park, submodel = "det")
 
@@ -737,6 +450,9 @@ lynx_nmix_stan <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 lynx_nmix_stan
+
+saveRDS(lynx_nmix_stan, file = "lynx_nmix_stan.rds")
+
 plot_effects(lynx_nmix_stan, submodel = "state")
 plot_effects(lynx_nmix_stan, submodel = "det")
 
@@ -780,6 +496,221 @@ lynx_pc2_plot <- plot_interaction_ubms(
 lynx_pc2_plot
 ```
 
+##Plot Coyote, Red Fox, Lynx on one graph
+```{r}
+plots <- list(
+  coyote_boreal_pc1 = plot_interaction_ubms(
+      model = coyote_nmix_ubms_boreal,
+      focal = "PC1", moderator = "hf",
+      species = "coyote", data = covars_boreal,
+      ylab = "Abundance", xlab = "Climate PC1",
+      title = NULL
+    ),
+  
+  coyote_boreal_pc2 = plot_interaction_ubms(
+      model = coyote_nmix_ubms_boreal,
+      focal = "PC2", moderator = "hf",
+      species = "coyote", data = covars_boreal,
+      ylab = "Abundance", xlab = "Climate PC2",
+      title = NULL
+    ),
+    coyote_park_pc1 = plot_interaction_ubms(
+      model = coyote_nmix_ubms_park,
+      focal = "PC1", moderator = "hf",
+      species = "coyote", data = covars_park,
+      ylab = "Abundance", xlab = "Climate PC1",
+      title = NULL
+    ),
+  
+  coyote_park_pc2 = plot_interaction_ubms(
+      model = coyote_nmix_ubms_park,
+      focal = "PC2", moderator = "hf",
+      species = "coyote", data = covars_park,
+      ylab = "Abundance", xlab = "Climate PC2",
+      title = NULL
+    ),
+  
+  redfox_boreal_pc1 = plot_interaction_ubms(
+      model = redfox_nmix_stan_boreal,
+      focal = "PC1", moderator = "hf",
+      species = "redfox", data = covars_boreal,
+      ylab = "Abundance", xlab = "Climate PC1",
+      title = NULL
+    ),
+  
+  redfox_boreal_pc2 = plot_interaction_ubms(
+      model = redfox_nmix_stan_boreal,
+      focal = "PC2", moderator = "hf",
+      species = "redfox", data = covars_boreal,
+      ylab = "Abundance", xlab = "Climate PC2",
+      title = NULL
+    ),
+  
+  redfox_park_pc1 = plot_interaction_ubms(
+    model = redfox_nmix_stan_park,
+    focal = "PC1", moderator = "hf",
+    species = "redfox", data = covars_park,
+    ylab = "Abundance", xlab = "Climate PC1",
+    title = NULL
+    ),
+  
+  redfox_park_pc2 = plot_interaction_ubms(
+      model = redfox_nmix_stan_park,
+      focal = "PC2", moderator = "hf",
+      species = "redfox", data = covars_park,
+      ylab = "Abundance", xlab = "Climate PC2",
+      title = NULL
+    ),
+  
+    lynx_boreal_pc1 = plot_interaction_ubms(
+      model = lynx_nmix_stan,
+      focal = "PC1", moderator = "hf",
+      species = "lynx", data = covars_boreal,
+      ylab = "Abundance", xlab = "Climate PC1",
+      title = NULL
+    ),
+  
+  lynx_boreal_pc2 = plot_interaction_ubms(
+      model = lynx_nmix_stan,
+      focal = "PC2", moderator = "hf",
+      species = "lynx", data = covars_boreal,
+      ylab = "Abundance", xlab = "Climate PC2",
+      title = NULL
+    )
+)
+
+```
+
+```{r}
+#Function to add icon
+make_icon_grob <- function(species_name, size = 0.30) {
+  icon_path <- file.path("data/phylopics", paste0(species_name, ".png"))
+  img <- magick::image_read(icon_path)
+  rasterGrob(img, width = size, height = size)
+}
+
+#Make a region label panel
+make_region_label <- function(region_name) {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = region_name, size = 5) +
+    theme_void()
+}
+
+#Create a left side label strip for each row, comine icon and label vertically
+make_row_label <- function(species_name, region_name) {
+  icon_panel <- ggplot() +
+    annotation_custom(make_icon_grob(species_name),
+                      xmin = -Inf, xmax = Inf,
+                      ymin = -Inf, ymax = Inf) +
+    theme_void() +
+    coord_cartesian(clip = "off")
+
+  region_panel <- make_region_label(region_name)
+
+  icon_panel / region_panel   # vertical stack
+}
+```
+
+```{r}
+
+#Combine row label + PC1 + PC2 into a row
+row_coyote_park <- 
+  make_row_label("coyote", "Grassland & Parkland") |
+  plots$coyote_park_pc1 |
+  plots$coyote_park_pc2
+
+row_coyote_boreal <- 
+  make_row_label("coyote", "Boreal & Shield") |
+  plots$coyote_boreal_pc1 |
+  plots$coyote_boreal_pc2
+
+row_redfox_park <- 
+  make_row_label("redfox", "Grassland & Parkland") | 
+  plots$redfox_park_pc1 | 
+  plots$redfox_park_pc2
+
+row_redfox_boreal <- 
+  make_row_label("redfox", "Boreal & Shield") | 
+  plots$redfox_boreal_pc1 | 
+  plots$redfox_boreal_pc2
+
+row_lynx_boreal <- 
+  make_row_label("lynx",   "Boreal & Shield") | 
+  plots$lynx_boreal_pc1 | 
+  plots$lynx_boreal_pc2
+
+#Stack rows into the final grid
+grid <- 
+  row_coyote_park /
+  row_coyote_boreal /
+  row_redfox_park /
+  row_redfox_boreal /
+  row_lynx_boreal
+
+#Remove x axis labels from all but the bottom row
+final <- grid +
+  plot_annotation(
+    tag_levels = NULL,
+    theme = theme(
+      plot.title = element_text(size = 14)
+    )
+  ) &
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank()
+  )
+
+#Make a PC1 axis label panel
+xlab_pc1 <- ggplot() +
+  annotate("text", x = 0.5, y = 0.5, label = "Climate PC1", size = 5) +
+  theme_void()
+
+#Make a PC2 axis label panel
+xlab_pc2 <- ggplot() +
+  annotate("text", x = 0.5, y = 0.5, label = "Climate PC2", size = 5) +
+  theme_void()
+
+#Attach them under grid
+final <- final /
+         (xlab_pc1 | xlab_pc2)
+
+
+
+#Add column level x axis labels
+final <- grid +
+  plot_annotation(
+    tag_levels = NULL,
+    theme = theme(
+      plot.title = element_text(size = 14)
+    )
+  ) &
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank()
+  )
+
+final <- wrap_plots(
+  grid,
+  widths = c(1, 3, 3),
+  guides = "collect"
+) +
+  plot_annotation(
+    title = NULL,
+    caption = NULL
+  )
+
+#Add shared legend for human footprint
+legend <- get_legend(
+  plots$coyote_park_pc1 + theme(legend.position = "right")
+)
+
+final <- grid | legend
+
+final
+
+ggsave("interactionplots_abmi.pdf", final, width = 7, height = 12)
+```
+
 ##Marten
 ```{r}
 ##marten
@@ -797,6 +728,9 @@ marten_nmix_stan <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 marten_nmix_stan
+
+saveRDS(coyote_nmix_ubms_park, file = "coyote_nmix_ubms_park.rds")
+
 plot_effects(marten_nmix_stan, submodel = "state")
 plot_effects(marten_nmix_stan, submodel = "det")
 
@@ -857,6 +791,9 @@ fisher_nmix_stan <- stan_pcount(formula =  ~ bait
                      cores = 3)
 
 fisher_nmix_stan
+
+saveRDS(coyote_nmix_ubms_park, file = "coyote_nmix_ubms_park.rds")
+
 plot_effects(fisher_nmix_stan, submodel = "state")
 plot_effects(fisher_nmix_stan, submodel = "det")
 
