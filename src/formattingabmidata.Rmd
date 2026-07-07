@@ -796,7 +796,11 @@ hulls <- plot_data %>%
   slice(chull(x, y))
 
 
+<<<<<<< HEAD
 pc_plot <- pc_plot + 
+=======
+pc_plot <- plot + 
+>>>>>>> 8949e69ff928a009b3f00e79ae9ba484d138eef8
   geom_polygon(
     data = hulls,
     aes(x = x, y = y, group = region, linetype = region),
@@ -818,9 +822,13 @@ pc_plot <- pc_plot +
     max.overlaps = Inf
 )
 
+<<<<<<< HEAD
 pc_plot
 
 ggsave("pc_plot.png", pc_plot, width = 8, height = 7)
+=======
+ggsave("data/pc_plot.png", pc_plot)
+>>>>>>> 8949e69ff928a009b3f00e79ae9ba484d138eef8
 ```
 
 ##ABMI Linear Features
