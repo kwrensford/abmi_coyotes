@@ -159,7 +159,7 @@ names(hillshade_df) <- c("x", "y", "value")
 #Climate PC1
 p_pc1 <- ggplot() +
   geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+  scale_fill_gradient(low = "grey90", high = "grey80", guide = "none") +
 
   geom_sf(data = region_groups,
           aes(linetype = region_group),
@@ -192,7 +192,7 @@ p_pc1 <- ggplot() +
 #Climate PC2
 p_pc2 <- ggplot() +
   geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+  scale_fill_gradient(low = "grey90", high = "grey80", guide = "none") +
 
   geom_sf(data = region_groups,
           aes(linetype = region_group),
@@ -217,7 +217,7 @@ p_pc2 <- ggplot() +
 #Climate HF
 p_hf <- ggplot() +
   geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
+  scale_fill_gradient(low = "grey90", high = "grey80", guide = "none") +
 
   geom_sf(data = region_groups,
           aes(linetype = region_group),
@@ -253,7 +253,7 @@ na <- ne_countries(continent = "North America", returnclass = "sf")
 #Create inset map
 inset_map <- ggplot() +
   geom_sf(data = na, fill = "grey90", color = "white") +
-  geom_sf(data = alberta_sf, fill = "red", alpha = 0.7) +
+  geom_sf(data = alberta, fill = "red", alpha = 0.7) +
   theme_void()
 
 ggsave("data/inset.png", inset_map, width = 3, height = 3, dpi = 300)
