@@ -40,6 +40,8 @@ library(rnaturalearthdata)
 library(grid)
 library(patchwork)
 library(cowplot)
+library(ggnewscale)
+library(magick)
 ```
 
 ##Load in covariate dataset with lat and long
@@ -108,7 +110,7 @@ bioregions_clipped <- st_intersection(bioregions, alberta)
 
 grass_park <- bioregions_clipped %>%
   filter(NRNAME %in% c("Grassland", "Parkland") | 
-           NSRNAME == "Dry Mixedwoof"
+           NSRNAME == "Dry Mixedwood"
          )
 
 boreal_shield <- bioregions_clipped %>%
@@ -120,15 +122,19 @@ boreal_shield <- bioregions_clipped %>%
 #Dissolve each group into a single polygon
 grass_park_poly <- grass_park %>%
   dplyr::summarise(geometry = st_union(geometry)) %>%
-  dplyr::mutate(region_group = "Grassland & Parkland")
+  dplyr::mutate(region_group = "Grassland/Parkland")
 
 boreal_shield_poly <- boreal_shield %>%
   dplyr::summarise(geometry = st_union(geometry)) %>%
-  dplyr::mutate(region_group = "Boreal & Shield")
+  dplyr::mutate(region_group = "Boreal/Shield")
 
 region_groups <- dplyr::bind_rows(grass_park_poly, boreal_shield_poly)
 
 region_groups <- st_intersection(region_groups, alberta)
+
+
+region_groups <- region_groups %>%
+  mutate(region_group = factor(region_group))
 
 ```
 
@@ -158,20 +164,29 @@ names(hillshade_df) <- c("x", "y", "value")
 ```{r}
 #Climate PC1
 p_pc1 <- ggplot() +
-  geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey80", guide = "none") +
+  geom_raster(data = hillshade_df,
+              aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
 
+  ggnewscale::new_scale_fill() +   # <--- reset fill scale
+  
   geom_sf(data = region_groups,
-          aes(linetype = region_group),
-          fill = NA,
-          alpha = 0.25,
-          linewidth = 0.6) +
+          aes(fill = region_group),
+          alpha = 0.5,
+          color = NA) +
+  
+  scale_fill_manual(
+    values = c(
+      "Grassland/Parkland" = "#E0C9A8",
+      "Boreal/Shield" = "#A2B9A3"
+    )
+  ) +
   
   geom_sf(data = covars_sf,
           aes(color = PC1),
           size = 2,
           alpha = 0.9) +
-  scale_color_viridis_c(option = "viridis", name = "Climate PC1 (Overerall Climate)" ) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC1 (Overall Climate)" ) +
 
   coord_sf(expand = FALSE) +
   theme_minimal() +
@@ -182,23 +197,49 @@ p_pc1 <- ggplot() +
   ) +
   
   annotation_scale(
+    location = "bl",
+    width_hint = 0.3,
+    text_cex = 0.8,
+    bar_cols = c("grey20", "white"),
+    pad_x = unit(0.1, "in"),
+    pad_y = unit(0.1, "in")
+  ) +
+  
+  guides(fill = "none") +
+  
+  theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank()
+  )
+
+#Dummy scale bar
+dummy_scale <- annotation_scale(
   location = "bl",
   width_hint = 0.3,
   text_cex = 0.8,
-  bar_cols = c("grey20", "white")
+  bar_cols = c("white", "white")  # invisible
 )
 
 
 #Climate PC2
 p_pc2 <- ggplot() +
-  geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey80", guide = "none") +
+  geom_raster(data = hillshade_df,
+              aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
 
+  ggnewscale::new_scale_fill() +   # <--- reset fill scale
+  
   geom_sf(data = region_groups,
-          aes(linetype = region_group),
-          fill = NA,
-          alpha = 0.25,
-          linewidth = 0.6) +
+          aes(fill = region_group),
+          alpha = 0.5,
+          color = NA) +
+  
+  scale_fill_manual(
+    values = c(
+      "Grassland/Parkland" = "#E0C9A8",
+      "Boreal/Shield" = "#A2B9A3"
+    )
+  ) +
   
   geom_sf(data = covars_sf,
           aes(color = PC2),
@@ -212,24 +253,43 @@ p_pc2 <- ggplot() +
     panel.grid = element_blank(),
     axis.title = element_blank(),
     legend.position = "right"
-  )
+  ) +
+  
+  guides(fill = "none") +
+  
+  theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank()
+  ) + 
+  
+  dummy_scale
+
 
 #Climate HF
 p_hf <- ggplot() +
-  geom_raster(data = hillshade_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey80", guide = "none") +
+  geom_raster(data = hillshade_df,
+              aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
 
+  ggnewscale::new_scale_fill() +   # <--- reset fill scale
+  
   geom_sf(data = region_groups,
-          aes(linetype = region_group),
-          fill = NA,
-          alpha = 0.25,
-          linewidth = 0.6) +
+          aes(fill = region_group),
+          alpha = 0.5,
+          color = NA) +
+  
+  scale_fill_manual(
+    values = c(
+      "Grassland/Parkland" = "#E0C9A8",
+      "Boreal/Shield" = "#A2B9A3"
+    )
+  ) +
   
   geom_sf(data = covars_sf,
           aes(color = hf),
           size = 2,
           alpha = 0.9) +
-  scale_color_viridis_c(option = "viridis", name = "HF") +
+  scale_color_viridis_c(option = "viridis", name = "Human Footprint") +
 
   coord_sf(expand = FALSE) +
   theme_minimal() +
@@ -237,14 +297,24 @@ p_hf <- ggplot() +
     panel.grid = element_blank(),
     axis.title = element_blank(),
     legend.position = "right"
-  )
+  ) +
+  
+  guides(fill = "none") +
+  
+  theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank()
+  ) +
+  
+  dummy_scale
 
-ggsave("data/hf.png", p_hf, width = 6, height = 6, dpi = 300)
-ggsave("data/pc1.png", p_pc1, width = 6, height = 6, dpi = 300)
-ggsave("data/pc2.png", p_pc2, width = 6, height = 6, dpi = 300)
+ggsave("data/hf.png", p_hf, width = 8, height = 8, dpi = 300)
+ggsave("data/pc1.png", p_pc1, width = 8, height = 8, dpi = 300)
+ggsave("data/pc2.png", p_pc2, width = 8, height = 8, dpi = 300)
 
 ```
 
+#Make Inset Map
 ```{r}
 
 #North America Outline
@@ -254,74 +324,64 @@ na <- ne_countries(continent = "North America", returnclass = "sf")
 inset_map <- ggplot() +
   geom_sf(data = na, fill = "grey90", color = "white") +
   geom_sf(data = alberta, fill = "red", alpha = 0.7) +
+   geom_sf(data = st_as_sfc(st_bbox(na)), fill = NA, color = "black", linewidth = 0.8) +
   theme_void()
 
 ggsave("data/inset.png", inset_map, width = 3, height = 3, dpi = 300)
 
-inset_grob <- ggplotGrob(inset_map)
+```
+
+#Combine Plots
+```{r}
+#Extract legend for regions
+legend_rg <- cowplot::get_legend(
+  ggplot() +
+    geom_sf(data = region_groups,
+            aes(fill = region_group),
+            alpha = 0.5,
+            color = NA) +
+    scale_fill_manual(
+      values = c(
+        "Grassland/Parkland" = "#E0C9A8",
+        "Boreal/Shield"      = "#A2B9A3"
+      ),
+      name = "Region Group"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "right")
+)
 
 
 #Combine Maps
-combined <- plot_grid(p_hf, p_pc1, p_pc2, inset_map, align = "vh")
-```
+combined_maps <- cowplot::plot_grid(
+  p_pc1,
+  p_pc2,
+  p_hf,
+  ncol = 3,
+  rel_heights = c(1, 1, 1),
+  align = "h",
+  axis = "tb"
+)
 
-```{r}
-#Faceted covariate map
+right_column <- cowplot::plot_grid(
+  inset_map,   # your inset ggplot with border
+  legend_rg,   # extracted region legend
+  ncol = 1,
+  rel_heights = c(0.55, 0.45),
+  align = "v"
+)
 
-#Create a long dataset for faceting
-coords <- st_coordinates(covars_sf)
+studymap <- cowplot::plot_grid(
+  combined_maps,
+  right_column,
+  ncol = 2,
+  rel_widths = c(1, 0.22)   # adjust width of right column
+)
 
-covars_df <- covars_sf %>%
-  st_drop_geometry() %>%
-  bind_cols(coords)
+studymap
 
-covars_long <- covars_df %>%
-  pivot_longer(
-    cols = c(hf, PC1, PC2),
-    names_to = "covariate",
-    values_to = "value"
-  )
-
-covars_long <- st_as_sf(covars_long, coords = c("X", "Y"), crs = 4326)
-
-
-p <- ggplot() +
-  geom_raster(data = hillshade_df,
-              aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey90", high = "grey60", guide = "none") +
-
-  geom_sf(data = region_groups,
-          aes(linetype = region_group),
-          fill = NA,
-          color = "black",
-          linewidth = 0.6,
-          alpha = 0.4) +
-
-  geom_sf(data = covars_long,
-          aes(color = value),
-          size = 1.5,
-          alpha = 0.9) +
-  scale_color_viridis_c(option = "magma") +
-
-  facet_wrap(~ covariate, ncol = 3) +
-
-  coord_sf(expand = FALSE) +
-
-  annotation_scale(location = "bl", width_hint = 0.3) +
-
-  theme_minimal() +
-  theme(
-    panel.grid = element_blank(),
-    axis.title = element_blank(),
-    legend.position = "right",
-    strip.text = element_text(size = 12, face = "bold")
-  )
-
-p + annotation_custom(
-      grob = ggplotGrob(inset_map),
-      xmin = -117, xmax = -112,
-      ymin = 59, ymax = 62
-    )
-
+ggsave("data/studymap.png", width = 8, height = 2)
+ggsave("data/studymap.pdf", width = 8, height = 2)
 
 ```
+
