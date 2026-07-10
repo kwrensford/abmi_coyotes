@@ -42,6 +42,7 @@ library(patchwork)
 library(cowplot)
 library(ggnewscale)
 library(magick)
+library(ggplotify)
 ```
 
 ##Load in covariate dataset with lat and long
@@ -67,6 +68,11 @@ sf::st_geometry(covars_sf)
 alberta <- arc_open("https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0") %>%
   arc_select() %>%
   st_as_sf()
+
+alberta <- arc_open("https://geospatial.alberta.ca/titan/rest/services/boundary/ab_provincial_boundary/MapServer/0") %>%
+  arc_select() %>%
+  st_as_sf() %>%
+  st_transform(4326)
 
 alberta <- alberta %>% 
   dplyr::summarise(geometry = st_union(geometry))
@@ -136,9 +142,34 @@ region_groups <- st_intersection(region_groups, alberta)
 region_groups <- region_groups %>%
   mutate(region_group = factor(region_group))
 
+plot(alberta)
+plot(region_groups, add = TRUE, color = "blue")
+
+plot(st_geometry(alberta))
+plot(st_geometry(region_groups))
+
+st_bbox(alberta)
+st_bbox(region_groups)
 ```
 
 ```{r}
+#Reproject before clipping
+alberta <- st_transform(alberta, 3400)
+region_groups <- st_transform(region_groups, 3400)
+covars_sf <- st_transform(covars_sf, 3400)
+
+elev <- terra::project(elev, "EPSG:3400")
+hill <- terrain(elev, v = "slope", unit = "radians")
+aspect <- terrain(elev, v = "aspect", unit = "radians")
+hillshade <- shade(hill, aspect)
+hillshade_gray <- terra::app(hillshade, fun = mean)
+
+alberta_vect <- vect(alberta)
+
+```
+
+```{r}
+#Clip everything to alberta boundaries
 
 #target_crs <- st_crs(covars_sf)
 
@@ -164,8 +195,10 @@ names(hillshade_df) <- c("x", "y", "value")
 ```{r}
 #Climate PC1
 p_pc1 <- ggplot() +
+  
   geom_raster(data = hillshade_df,
               aes(x = x, y = y, fill = value)) +
+  
   scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
 
   ggnewscale::new_scale_fill() +   # <--- reset fill scale
@@ -188,21 +221,18 @@ p_pc1 <- ggplot() +
           alpha = 0.9) +
   scale_color_viridis_c(option = "viridis", name = "Climate PC1 (Overall Climate)" ) +
 
-  coord_sf(expand = FALSE) +
+  coord_sf(
+    xlim = c(bbox$xmin, bbox$xmax),
+    ylim = c(bbox$ymin, bbox$ymax),
+    expand = FALSE
+    ) +
+  
   theme_minimal() +
+  
   theme(
     panel.grid = element_blank(),
     axis.title = element_blank(),
     legend.position = "right"
-  ) +
-  
-  annotation_scale(
-    location = "bl",
-    width_hint = 0.3,
-    text_cex = 0.8,
-    bar_cols = c("grey20", "white"),
-    pad_x = unit(0.1, "in"),
-    pad_y = unit(0.1, "in")
   ) +
   
   guides(fill = "none") +
@@ -210,15 +240,15 @@ p_pc1 <- ggplot() +
   theme(
       axis.text = element_blank(),
       axis.ticks = element_blank()
+  ) +
+  
+  annotation_scale(
+    location = "bl",
+    width_hint = 0.3,
+    pad_x = unit(0.1, "cm"),
+    pad_y = unit(0.1, "cm")
   )
 
-#Dummy scale bar
-dummy_scale <- annotation_scale(
-  location = "bl",
-  width_hint = 0.3,
-  text_cex = 0.8,
-  bar_cols = c("white", "white")  # invisible
-)
 
 
 #Climate PC2
@@ -247,7 +277,11 @@ p_pc2 <- ggplot() +
           alpha = 0.9) +
   scale_color_viridis_c(option = "viridis", name = "Climate PC2 (Aridity)") +
 
-  coord_sf(expand = FALSE) +
+  coord_sf(
+    xlim = c(bbox$xmin, bbox$xmax),
+    ylim = c(bbox$ymin, bbox$ymax),
+    expand = FALSE
+    ) +
   theme_minimal() +
   theme(
     panel.grid = element_blank(),
@@ -260,10 +294,7 @@ p_pc2 <- ggplot() +
   theme(
       axis.text = element_blank(),
       axis.ticks = element_blank()
-  ) + 
-  
-  dummy_scale
-
+  ) 
 
 #Climate HF
 p_hf <- ggplot() +
@@ -291,7 +322,11 @@ p_hf <- ggplot() +
           alpha = 0.9) +
   scale_color_viridis_c(option = "viridis", name = "Human Footprint") +
 
-  coord_sf(expand = FALSE) +
+  coord_sf(
+    xlim = c(bbox$xmin, bbox$xmax),
+    ylim = c(bbox$ymin, bbox$ymax),
+    expand = FALSE
+    ) +
   theme_minimal() +
   theme(
     panel.grid = element_blank(),
@@ -304,9 +339,7 @@ p_hf <- ggplot() +
   theme(
       axis.text = element_blank(),
       axis.ticks = element_blank()
-  ) +
-  
-  dummy_scale
+  ) 
 
 ggsave("data/hf.png", p_hf, width = 8, height = 8, dpi = 300)
 ggsave("data/pc1.png", p_pc1, width = 8, height = 8, dpi = 300)
@@ -333,6 +366,42 @@ ggsave("data/inset.png", inset_map, width = 3, height = 3, dpi = 300)
 
 #Combine Plots
 ```{r}
+legend_rg_big <- cowplot::get_legend(
+  ggplot() +
+    geom_sf(data = region_groups,
+            aes(fill = region_group),
+            alpha = 0.5,
+            color = NA) +
+    scale_fill_manual(
+      values = c(
+        "Grassland/Parkland" = "#E0C9A8",
+        "Boreal/Shield"      = "#A2B9A3"
+      ),
+      name = "Region Group"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "right",
+      legend.key.size = unit(0.6, "lines"),
+      legend.text = element_text(size = 10),
+      legend.title = element_text(size = 11),
+      legend.spacing.y = unit(0.2, "lines")
+    )
+)
+
+info_panel <- inset_map / legend_rg  +
+  plot_layout(heights = c(0.55, 0.25, 0.20))
+
+study_map <- p_pc1 + p_pc2 + p_hf + info_panel + 
+  plot_layout(ncol = 2)
+
+study_map
+
+ggsave("data/study_map.png", study_map, width = 8, height = 8, dpi = 300)
+
+```
+
+```{r}
 #Extract legend for regions
 legend_rg <- cowplot::get_legend(
   ggplot() +
@@ -358,7 +427,7 @@ combined_maps <- cowplot::plot_grid(
   p_pc2,
   p_hf,
   ncol = 3,
-  rel_heights = c(1, 1, 1),
+  rel_widths = c(1, 1, 1),
   align = "h",
   axis = "tb"
 )
