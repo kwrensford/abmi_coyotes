@@ -255,15 +255,15 @@ ggplot(detections_plot,
 covariates_fixed$region <- with(covariates_fixed, case_when(
   
   # Group 1: Canadian Shield + Boreal except Dry Mixedgrass
-  NR == "Canadian Shield" ~ "Shield+Boreal",
-  NR == "Boreal" & NSR != "Dry Mixedwood" ~ "Shield+Boreal",
+  NR == "Canadian Shield" ~ "Shield/Boreal",
+  NR == "Boreal" & NSR != "Dry Mixedwood" ~ "Shield/Boreal",
   
   # Group 2: Grassland + Parkland + Dry Mixedgrass
-  NR %in% c("Grassland", "Parkland") ~ "Grassland+Parkland",
-  NSR == "Dry Mixedwood" ~ "Grassland+Parkland",
+  NR %in% c("Grassland", "Parkland") ~ "Grassland/Parkland",
+  NSR == "Dry Mixedwood" ~ "Grassland/Parkland",
   
   # Group 3: Rocky Mountain + Foothills
-  NR %in% c("Rocky Mountain", "Foothills") ~ "Rocky+Foothills",
+  NR %in% c("Rocky Mountain", "Foothills") ~ "Rocky/Foothills",
   
   TRUE ~ "Other"   # safety catch; should not be needed
 ))
@@ -297,17 +297,17 @@ covariates_fixed <- covariates_fixed %>%
     # Grouping 0: original regions
     region_group0 = region,
 
-    # Grouping 1: Combine Rocky+Foothills + Shield+Boreal
+    # Grouping 1: Combine Rocky+Foothills + Shield/Boreal
     region_group1 = case_when(
-      region %in% c("Rocky+Foothills", "Shield+Boreal") ~ "Rocky/Shield Combined",
-      region == "Grassland+Parkland" ~ "Grassland+Parkland",
+      region %in% c("Rocky+Foothills", "Shield/Boreal") ~ "Rocky/Shield Combined",
+      region == "Grassland/Parkland" ~ "Grassland/Parkland",
       TRUE ~ NA_character_
     ),
 
     # Grouping 2: Drop Rocky+Foothills entirely
     region_group2 = case_when(
-      region == "Shield+Boreal" ~ "Shield+Boreal",
-      region == "Grassland+Parkland" ~ "Grassland+Parkland",
+      region == "Shield/Boreal" ~ "Shield/Boreal",
+      region == "Grassland/Parkland" ~ "Grassland/Parkland",
       TRUE ~ NA_character_
     )
   )
@@ -584,14 +584,14 @@ coyote_boreal <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Coyote",
-  region = "Shield+Boreal"
+  region = "Shield/Boreal"
 )
 
 coyote_park <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Coyote",
-  region = "Grassland+Parkland"
+  region = "Grassland/Parkland"
 )
 
 coyote$detection_matrix
@@ -607,14 +607,14 @@ redfox_boreal <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Red Fox",
-  region = "Shield+Boreal"
+  region = "Shield/Boreal"
 )
 
 redfox_park <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Red Fox",
-  region = "Grassland+Parkland"
+  region = "Grassland/Parkland"
 )
 
 lynx <- make_matrices(
@@ -627,7 +627,7 @@ lynx_boreal <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Canada Lynx",
-  region = "Shield+Boreal"
+  region = "Shield/Boreal"
 )
 
 marten <- make_matrices(
@@ -640,21 +640,21 @@ marten_boreal <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Marten",
-  region = "Shield+Boreal"
+  region = "Shield/Boreal"
 )
   
 fisher <- make_matrices(
   det_df = study_main_reports,
   camop_df = camop_clean,
   species = "Fisher",
-  region = "Shield+Boreal"
+  region = "Shield/Boreal"
 )
 
 fisher_boreal <- make_matrices(
   det_df = det_with_region,
   camop_df = camop_clean,
   species = "Fisher",
-  region = "Shield+Boreal"
+  region = "Shield/Boreal"
 )
   
 ```
@@ -795,12 +795,7 @@ hulls <- plot_data %>%
   group_by(region) %>%
   slice(chull(x, y))
 
-
-<<<<<<< HEAD
 pc_plot <- pc_plot + 
-=======
-pc_plot <- plot + 
->>>>>>> 8949e69ff928a009b3f00e79ae9ba484d138eef8
   geom_polygon(
     data = hulls,
     aes(x = x, y = y, group = region, linetype = region),
@@ -822,15 +817,27 @@ pc_plot <- plot +
     max.overlaps = Inf
 )
 
-<<<<<<< HEAD
 pc_plot
 
-ggsave("pc_plot.png", pc_plot, width = 8, height = 7)
-=======
-ggsave("data/pc_plot.png", pc_plot)
->>>>>>> 8949e69ff928a009b3f00e79ae9ba484d138eef8
+ggsave("data/pc_plot.png", pc_plot, width = 8, height = 7)
 ```
 
+```{r}
+det_covars <- left_join(study_main_reports, covars, by = "location")
+
+det_summary <- det_covars %>%
+  count(location, species_common_name, name = "detections")
+
+ggplot(det_summary, aes(x = PC1), y = detections, color = hf)+
+  geom_point(size = 3, alpha = 0.9) +
+  scale_color_viridis(option = "plasma", direction = -1) +
+  labs(
+    x = "Climate PC1",
+    y = "Number of Detections",
+    color = "Human Footprint"
+  ) +
+  theme_classic(base_size = 14)
+```
 ##ABMI Linear Features
 
 ```{r}
@@ -1119,7 +1126,7 @@ p1 <- ggplot(plot_data1, aes(x = region_group1, y = value, fill = region_group1)
   theme_minimal(base_size = 13) +
   theme(axis.text.x = element_text(angle = 25, hjust = 1),
         legend.position = "none") +
-  labs(title = "A) Rocky+Foothills + Shield+Boreal Combined vs Grassland+Parkland",
+  labs(title = "A) Rocky+Foothills + Shield/Boreal Combined vs Grassland/Parkland",
        x = "Region Group", y = "Value")
 
 p2 <- ggplot(plot_data2, aes(x = region_group2, y = value, fill = region_group2)) +
@@ -1129,7 +1136,7 @@ p2 <- ggplot(plot_data2, aes(x = region_group2, y = value, fill = region_group2)
   theme_minimal(base_size = 13) +
   theme(axis.text.x = element_text(angle = 25, hjust = 1),
         legend.position = "none") +
-  labs(title = "B) Shield+Boreal vs Grassland+Parkland (Rocky+Foothills Removed)",
+  labs(title = "B) Shield/Boreal vs Grassland/Parkland (Rocky+Foothills Removed)",
        x = "Region Group", y = "Value")
 
 library(patchwork)
