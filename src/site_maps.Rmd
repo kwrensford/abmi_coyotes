@@ -69,15 +69,11 @@ alberta <- arc_open("https://geospatial.alberta.ca/titan/rest/services/boundary/
   arc_select() %>%
   st_as_sf()
 
-alberta <- arc_open("https://geospatial.alberta.ca/titan/rest/services/boundary/ab_provincial_boundary/MapServer/0") %>%
-  arc_select() %>%
-  st_as_sf() %>%
-  st_transform(4326)
-
 alberta <- alberta %>% 
   dplyr::summarise(geometry = st_union(geometry))
 
 alberta <- st_transform(alberta, crs = 4326)
+bbox <- alberta
 
 #Download elevation raster
 elev <- get_elev_raster(locations = covars_sf, z = 10, clip = "bbox")
@@ -196,17 +192,13 @@ names(hillshade_df) <- c("x", "y", "value")
 #Climate PC1
 p_pc1 <- ggplot() +
   
-  geom_raster(data = hillshade_df,
-              aes(x = x, y = y, fill = value)) +
-  
-  scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
-
-  ggnewscale::new_scale_fill() +   # <--- reset fill scale
+  geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
   
   geom_sf(data = region_groups,
           aes(fill = region_group),
           alpha = 0.5,
-          color = NA) +
+          color = "black",
+          linewidth = 0.5) +
   
   scale_fill_manual(
     values = c(
@@ -219,6 +211,7 @@ p_pc1 <- ggplot() +
           aes(color = PC1),
           size = 2,
           alpha = 0.9) +
+  
   scale_color_viridis_c(option = "viridis", name = "Climate PC1 (Overall Climate)" ) +
 
   coord_sf(
@@ -249,20 +242,15 @@ p_pc1 <- ggplot() +
     pad_y = unit(0.1, "cm")
   )
 
-
-
 #Climate PC2
 p_pc2 <- ggplot() +
-  geom_raster(data = hillshade_df,
-              aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
-
-  ggnewscale::new_scale_fill() +   # <--- reset fill scale
+  geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
   
   geom_sf(data = region_groups,
           aes(fill = region_group),
           alpha = 0.5,
-          color = NA) +
+          color = "black",
+          linewidth = 0.5) +
   
   scale_fill_manual(
     values = c(
@@ -298,16 +286,13 @@ p_pc2 <- ggplot() +
 
 #Climate HF
 p_hf <- ggplot() +
-  geom_raster(data = hillshade_df,
-              aes(x = x, y = y, fill = value)) +
-  scale_fill_gradient(low = "grey95", high = "grey60", guide = "none") +
-
-  ggnewscale::new_scale_fill() +   # <--- reset fill scale
+  geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
   
   geom_sf(data = region_groups,
           aes(fill = region_group),
           alpha = 0.5,
-          color = NA) +
+          color = "black",
+          linewidth = 0.5) +
   
   scale_fill_manual(
     values = c(
@@ -366,7 +351,7 @@ ggsave("data/inset.png", inset_map, width = 3, height = 3, dpi = 300)
 
 #Combine Plots
 ```{r}
-legend_rg_big <- cowplot::get_legend(
+legend_rg <- cowplot::get_legend(
   ggplot() +
     geom_sf(data = region_groups,
             aes(fill = region_group),
@@ -389,8 +374,7 @@ legend_rg_big <- cowplot::get_legend(
     )
 )
 
-info_panel <- inset_map / legend_rg  +
-  plot_layout(heights = c(0.55, 0.25, 0.20))
+info_panel <- inset_map / legend_rg 
 
 study_map <- p_pc1 + p_pc2 + p_hf + info_panel + 
   plot_layout(ncol = 2)
@@ -398,59 +382,7 @@ study_map <- p_pc1 + p_pc2 + p_hf + info_panel +
 study_map
 
 ggsave("data/study_map.png", study_map, width = 8, height = 8, dpi = 300)
-
-```
-
-```{r}
-#Extract legend for regions
-legend_rg <- cowplot::get_legend(
-  ggplot() +
-    geom_sf(data = region_groups,
-            aes(fill = region_group),
-            alpha = 0.5,
-            color = NA) +
-    scale_fill_manual(
-      values = c(
-        "Grassland/Parkland" = "#E0C9A8",
-        "Boreal/Shield"      = "#A2B9A3"
-      ),
-      name = "Region Group"
-    ) +
-    theme_minimal() +
-    theme(legend.position = "right")
-)
-
-
-#Combine Maps
-combined_maps <- cowplot::plot_grid(
-  p_pc1,
-  p_pc2,
-  p_hf,
-  ncol = 3,
-  rel_widths = c(1, 1, 1),
-  align = "h",
-  axis = "tb"
-)
-
-right_column <- cowplot::plot_grid(
-  inset_map,   # your inset ggplot with border
-  legend_rg,   # extracted region legend
-  ncol = 1,
-  rel_heights = c(0.55, 0.45),
-  align = "v"
-)
-
-studymap <- cowplot::plot_grid(
-  combined_maps,
-  right_column,
-  ncol = 2,
-  rel_widths = c(1, 0.22)   # adjust width of right column
-)
-
-studymap
-
-ggsave("data/studymap.png", width = 8, height = 2)
-ggsave("data/studymap.pdf", width = 8, height = 2)
+ggsave("data/study_map.pdf", study_map, dpi = 300)
 
 ```
 
