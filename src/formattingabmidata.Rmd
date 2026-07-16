@@ -768,11 +768,6 @@ mult <- min(
 
 load_df[, c("PC1", "PC2")] <- load_df[, c("PC1", "PC2")] * mult
 
-#Compute complex hulls for region polygons
-hulls <- climate_sites %>%
-  group_by(region) %>%
-  slice(chull(PC1, PC2))   # convex hull for each region
-
 
 pc_plot <- autoplot(pca_res, data = climate_sites, color = "Latitude",
          loadings = TRUE, loadings.color = "black", 
@@ -791,10 +786,35 @@ plot_data <- bind_cols(
   plot_data[,c("x","y")] #autoplot-scaled PC1/PC2
 )
 
+#Extract scaled PCA scores
+pb <- ggplot_build(pc_plot)
+
+scores_df <- pb$data[[1]] %>% 
+  select(x, y) %>% 
+  bind_cols(climate_sites)
+
+# Extract scaled loadings 
+# autoplot always puts loadings in the LAST layer
+loadings_df <- pb$data[[length(pb$data)]]
+
+# Clean up loadings_df
+loadings_df <- loadings_df %>%
+  select(x, y, label)
+
+# Clean up loadings_df
+loadings_df <- loadings_df %>%
+  select(x, y, label)
+
+#Compute complex hulls for region polygons
+hulls <- climate_sites %>%
+  group_by(region) %>%
+  slice(chull(PC1, PC2))   # convex hull for each region
+
 hulls <- plot_data %>%
   group_by(region) %>%
   slice(chull(x, y))
 
+#Build final plot with region hulls and arrow labels
 pc_plot <- pc_plot + 
   geom_polygon(
     data = hulls,
@@ -803,19 +823,20 @@ pc_plot <- pc_plot +
     colour = "black",
     linewidth = 0.5
   ) +
-  scale_linetype_manual(values = c("solid", "dashed", "dotted")) +
   geom_text_repel(
-    data = load_df,
-    aes(x = PC1, y = PC2, label = label),
+    data = loadings_df,
+    aes(x = x, y = y, label = label),
     fontface = "bold",
     size = 4,
     color = "black",
-    box.padding = 0.5,
-    point.padding = 0.3,
+    box.padding = 0,
+    point.padding = 0,
+    min.segment.length = 0,
+    force = 0.0001,
+    max.time = 0.1,
     segment.color = "grey40",
-    force = 3,
     max.overlaps = Inf
-)
+  )
 
 pc_plot
 
