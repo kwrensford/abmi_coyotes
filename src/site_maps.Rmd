@@ -148,183 +148,76 @@ st_bbox(alberta)
 st_bbox(region_groups)
 ```
 
-```{r}
-#Reproject before clipping
-alberta <- st_transform(alberta, 3400)
-region_groups <- st_transform(region_groups, 3400)
-covars_sf <- st_transform(covars_sf, 3400)
-
-elev <- terra::project(elev, "EPSG:3400")
-hill <- terrain(elev, v = "slope", unit = "radians")
-aspect <- terrain(elev, v = "aspect", unit = "radians")
-hillshade <- shade(hill, aspect)
-hillshade_gray <- terra::app(hillshade, fun = mean)
-
-alberta_vect <- vect(alberta)
-
-```
-
-```{r}
-#Clip everything to alberta boundaries
-
-#target_crs <- st_crs(covars_sf)
-
-#hillshade <- terra::project(hillshade, target_crs$wkt)
-
-#Convert alberta boundaries from spat vector to sf object
-alberta_vect <- vect(alberta)
-bbox <- alberta_vect
-
-#Crop hillshade file to Alberta boundaries
-hillshade_crop <- crop(hillshade, alberta)
-hillshade_crop <- mask(hillshade_crop, alberta)
-
-# downsample by factor (e.g., 5 = 25× fewer cells)
-hillshade_small <- aggregate(hillshade_crop, fact = 5, fun = mean)
-
-hillshade_df <- as.data.frame(hillshade_small, xy = TRUE)
-names(hillshade_df) <- c("x", "y", "value")
-```
-
 
 
 ```{r}
-#Climate PC1
+# --- modify each map: add top legend theme and guide for continuous color scale ---
+
+# Climate PC1
 p_pc1 <- ggplot() +
-  
   geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
-  
-  geom_sf(data = region_groups,
-          aes(fill = region_group),
-          alpha = 0.5,
-          color = "black",
-          linewidth = 0.5) +
-  
-  scale_fill_manual(
-    values = c(
-      "Grassland/Parkland" = "#E0C9A8",
-      "Boreal/Shield" = "#A2B9A3"
-    )
-  ) +
-  
-  geom_sf(data = covars_sf,
-          aes(color = PC1),
-          size = 2,
-          alpha = 0.9) +
-  
-  scale_color_viridis_c(option = "viridis", name = "Climate PC1 (Overall Climate)" ) +
-
-  coord_sf(
-    xlim = c(bbox$xmin, bbox$xmax),
-    ylim = c(bbox$ymin, bbox$ymax),
-    expand = FALSE
-    ) +
-  
+  geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  geom_sf(data = covars_sf, aes(color = PC1), size = 1, alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC1\n(Overall Climate)",
+                       guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                                              barwidth = unit(6, "cm"), barheight = unit(0.35, "cm"))) +
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = FALSE) +
   theme_minimal() +
-  
-  theme(
-    panel.grid = element_blank(),
-    axis.title = element_blank(),
-    legend.position = "right"
-  ) +
-  
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.title.align = 0.5,
+        plot.margin = unit(c(2, 2, 2, 2), "mm")) +
   guides(fill = "none") +
-  
-  theme(
-      axis.text = element_blank(),
-      axis.ticks = element_blank()
-  ) +
-  
-  annotation_scale(
-    location = "bl",
-    width_hint = 0.3,
-    pad_x = unit(0.1, "cm"),
-    pad_y = unit(0.1, "cm")
-  )
+  annotation_scale(location = "bl", width_hint = 0.3, pad_x = unit(0.1, "cm"), pad_y = unit(0.1, "cm"))
 
-#Climate PC2
+# Climate PC2
 p_pc2 <- ggplot() +
   geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
-  
-  geom_sf(data = region_groups,
-          aes(fill = region_group),
-          alpha = 0.5,
-          color = "black",
-          linewidth = 0.5) +
-  
-  scale_fill_manual(
-    values = c(
-      "Grassland/Parkland" = "#E0C9A8",
-      "Boreal/Shield" = "#A2B9A3"
-    )
-  ) +
-  
-  geom_sf(data = covars_sf,
-          aes(color = PC2),
-          size = 2,
-          alpha = 0.9) +
-  scale_color_viridis_c(option = "viridis", name = "Climate PC2 (Aridity)") +
-
-  coord_sf(
-    xlim = c(bbox$xmin, bbox$xmax),
-    ylim = c(bbox$ymin, bbox$ymax),
-    expand = FALSE
-    ) +
+  geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  geom_sf(data = covars_sf, aes(color = PC2), size = 1, alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC2\n(Aridity)",
+                       guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                                              barwidth = unit(6, "cm"), barheight = unit(0.35, "cm"))) +
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = FALSE) +
   theme_minimal() +
-  theme(
-    panel.grid = element_blank(),
-    axis.title = element_blank(),
-    legend.position = "right"
-  ) +
-  
-  guides(fill = "none") +
-  
-  theme(
-      axis.text = element_blank(),
-      axis.ticks = element_blank()
-  ) 
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.title.align = 0.5,
+        plot.margin = unit(c(2, 2, 2, 2), "mm")) +
+  guides(fill = "none")
 
-#Climate HF
+# Human Footprint
 p_hf <- ggplot() +
   geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
-  
-  geom_sf(data = region_groups,
-          aes(fill = region_group),
-          alpha = 0.5,
-          color = "black",
-          linewidth = 0.5) +
-  
-  scale_fill_manual(
-    values = c(
-      "Grassland/Parkland" = "#E0C9A8",
-      "Boreal/Shield" = "#A2B9A3"
-    )
-  ) +
-  
-  geom_sf(data = covars_sf,
-          aes(color = hf),
-          size = 2,
-          alpha = 0.9) +
-  scale_color_viridis_c(option = "viridis", name = "Human Footprint") +
-
-  coord_sf(
-    xlim = c(bbox$xmin, bbox$xmax),
-    ylim = c(bbox$ymin, bbox$ymax),
-    expand = FALSE
-    ) +
+  geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  geom_sf(data = covars_sf, aes(color = hf), size = 1, alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Human Footprint",
+                       guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                                              barwidth = unit(6, "cm"), barheight = unit(0.35, "cm"))) +
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = FALSE) +
   theme_minimal() +
-  theme(
-    panel.grid = element_blank(),
-    axis.title = element_blank(),
-    legend.position = "right"
-  ) +
-  
-  guides(fill = "none") +
-  
-  theme(
-      axis.text = element_blank(),
-      axis.ticks = element_blank()
-  ) 
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.title.align = 0.5,
+        plot.margin = unit(c(2, 2, 2, 2), "mm")) +
+  guides(fill = "none")
+
+
 
 ggsave("data/hf.png", p_hf, width = 8, height = 8, dpi = 300)
 ggsave("data/pc1.png", p_pc1, width = 8, height = 8, dpi = 300)
@@ -362,7 +255,7 @@ legend_rg <- cowplot::get_legend(
         "Grassland/Parkland" = "#E0C9A8",
         "Boreal/Shield"      = "#A2B9A3"
       ),
-      name = "Region Group"
+      name = "Region"
     ) +
     theme_minimal() +
     theme(
@@ -376,13 +269,16 @@ legend_rg <- cowplot::get_legend(
 
 info_panel <- inset_map / legend_rg 
 
-study_map <- p_pc1 + p_pc2 + p_hf + info_panel + 
-  plot_layout(ncol = 2)
+# --- combine: three maps in a row + info panel to the right ---
+study_map <- (p_pc1 + p_pc2 + p_hf) + info_panel +
+  plot_layout(ncol = 4, widths = c(1, 1, 1, 0.6), guides = "keep")
 
 study_map
 
-ggsave("data/study_map.png", study_map, width = 8, height = 8, dpi = 300)
-ggsave("data/study_map.pdf", study_map, dpi = 300)
+# preview and save (wider canvas so top legends fit)
+study_map
+ggsave("data/study_map.png", study_map, width = 14, height = 5, dpi = 300)
+ggsave("data/study_map.pdf", study_map, width = 14, height = 5, dpi = 300)
 
 ```
 
