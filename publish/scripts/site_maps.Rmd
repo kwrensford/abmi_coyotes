@@ -1,0 +1,284 @@
+---
+title: "Mapping Sites"
+author: "Kwasi Wrensford"
+date: "2026-03-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggfortify)
+library(ggrepel)
+library(forcats)
+library(lubridate)
+library(unmarked)
+library(camtrapR)
+library(overlap)
+library(ggmap)
+library(reshape2)
+library(corrplot)
+library(elevatr)
+library(terra)
+library(mapview)
+library(tmap)
+library(sf)
+library(exactextractr)
+library(xml2)
+library(geodata)
+library(viridis)
+library(ggspatial)
+library(arcgislayers)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(grid)
+library(patchwork)
+library(cowplot)
+library(ggnewscale)
+library(magick)
+library(ggplotify)
+```
+
+##Load in covariate dataset with lat and long
+```{r}
+covars <- read.csv("data/covars.csv")
+
+covars_sf <- st_as_sf(
+  covars,
+  coords = c("Longitude", "Latitude"),
+  crs = 4326
+)
+
+covars_vect <- vect(covars_sf)
+```
+
+```{r}
+#Convert Covars into sf
+sf::st_is_valid(covars_sf)
+nrow(covars_sf)
+sf::st_geometry(covars_sf)
+
+#Download alberta boundaries
+alberta <- arc_open("https://geospatial.alberta.ca/titan/rest/services/boundary/goa_administrative_area/MapServer/0") %>%
+  arc_select() %>%
+  st_as_sf()
+
+alberta <- alberta %>% 
+  dplyr::summarise(geometry = st_union(geometry))
+
+alberta <- st_transform(alberta, crs = 4326)
+bbox <- alberta
+
+#Download elevation raster
+elev <- get_elev_raster(locations = covars_sf, z = 10, clip = "bbox")
+elev <- rast(elev)
+
+#Get hillshade data
+hill <- terrain(elev, v = "slope", unit = "radians")
+aspect <- terrain(elev, v = "aspect", unit = "radians")
+hillshade <- shade(hill, aspect)
+hillshade_4326 <- terra::project(hillshade, "EPSG:4326")
+hillshade <- hillshade_4326
+hillshade_gray <- terra::app(hillshade, fun = mean)
+```
+
+```{r}
+#Download Alberta Bioregion data
+
+bioregion_url <- "https://geospatial.alberta.ca/titan/rest/services/biota/natural_subregions_alberta_2005/MapServer/0"
+
+layer <- arc_open(bioregion_url)
+bioregions <- arc_select(layer)
+
+#Transform natural region polygon to match cameras
+bioregions <- st_transform(bioregions, st_crs(covars_sf))
+
+#Join natural region polygons to camera data
+covars_with_region <- st_join(covars_sf, bioregions)
+
+names(bioregions)
+unique(bioregions$NRNAME)
+unique(bioregions$NSRNAME)
+
+bioregions_clipped <- st_intersection(bioregions, alberta)
+
+#Grassland Parkland region polygon
+
+grass_park <- bioregions_clipped %>%
+  filter(NRNAME %in% c("Grassland", "Parkland") | 
+           NSRNAME == "Dry Mixedwood"
+         )
+
+boreal_shield <- bioregions_clipped %>%
+  filter(
+    (NRNAME == "Boreal" & NSRNAME != "Dry Mixedwood") |
+      NRNAME == "Canadian Shield"
+  )
+
+#Dissolve each group into a single polygon
+grass_park_poly <- grass_park %>%
+  dplyr::summarise(geometry = st_union(geometry)) %>%
+  dplyr::mutate(region_group = "Grassland/Parkland")
+
+boreal_shield_poly <- boreal_shield %>%
+  dplyr::summarise(geometry = st_union(geometry)) %>%
+  dplyr::mutate(region_group = "Boreal/Shield")
+
+region_groups <- dplyr::bind_rows(grass_park_poly, boreal_shield_poly)
+
+region_groups <- st_intersection(region_groups, alberta)
+
+
+region_groups <- region_groups %>%
+  mutate(region_group = factor(region_group))
+
+plot(alberta)
+plot(region_groups, add = TRUE, color = "blue")
+
+plot(st_geometry(alberta))
+plot(st_geometry(region_groups))
+
+st_bbox(alberta)
+st_bbox(region_groups)
+```
+
+
+
+```{r}
+# --- modify each map: add top legend theme and guide for continuous color scale ---
+
+# Climate PC1
+p_pc1 <- ggplot() +
+  geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
+  geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  geom_sf(data = covars_sf, aes(color = PC1), size = 1, alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC1\n(Overall Climate)",
+                       guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                                              barwidth = unit(6, "cm"), barheight = unit(0.35, "cm"))) +
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = FALSE) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.title.align = 0.5,
+        plot.margin = unit(c(2, 2, 2, 2), "mm")) +
+  guides(fill = "none") +
+  annotation_scale(location = "bl", width_hint = 0.3, pad_x = unit(0.1, "cm"), pad_y = unit(0.1, "cm"))
+
+# Climate PC2
+p_pc2 <- ggplot() +
+  geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
+  geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  geom_sf(data = covars_sf, aes(color = PC2), size = 1, alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Climate PC2\n(Aridity)",
+                       guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                                              barwidth = unit(6, "cm"), barheight = unit(0.35, "cm"))) +
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = FALSE) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.title.align = 0.5,
+        plot.margin = unit(c(2, 2, 2, 2), "mm")) +
+  guides(fill = "none")
+
+# Human Footprint
+p_hf <- ggplot() +
+  geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
+  geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  geom_sf(data = covars_sf, aes(color = hf), size = 1, alpha = 0.9) +
+  scale_color_viridis_c(option = "viridis", name = "Human Footprint",
+                       guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
+                                              barwidth = unit(6, "cm"), barheight = unit(0.35, "cm"))) +
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = FALSE) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.title.align = 0.5,
+        plot.margin = unit(c(2, 2, 2, 2), "mm")) +
+  guides(fill = "none")
+
+
+
+ggsave("data/hf.png", p_hf, width = 8, height = 8, dpi = 300)
+ggsave("data/pc1.png", p_pc1, width = 8, height = 8, dpi = 300)
+ggsave("data/pc2.png", p_pc2, width = 8, height = 8, dpi = 300)
+
+```
+
+#Make Inset Map
+```{r}
+
+#North America Outline
+na <- ne_countries(continent = "North America", returnclass = "sf")
+
+#Create inset map
+inset_map <- ggplot() +
+  geom_sf(data = na, fill = "grey90", color = "white") +
+  geom_sf(data = alberta, fill = "red", alpha = 0.7) +
+   geom_sf(data = st_as_sfc(st_bbox(na)), fill = NA, color = "black", linewidth = 0.8) +
+  theme_void()
+
+ggsave("data/inset.png", inset_map, width = 3, height = 3, dpi = 300)
+
+```
+
+#Combine Plots
+```{r}
+legend_rg <- cowplot::get_legend(
+  ggplot() +
+    geom_sf(data = region_groups,
+            aes(fill = region_group),
+            alpha = 0.5,
+            color = NA) +
+    scale_fill_manual(
+      values = c(
+        "Grassland/Parkland" = "#E0C9A8",
+        "Boreal/Shield"      = "#A2B9A3"
+      ),
+      name = "Region"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "right",
+      legend.key.size = unit(0.6, "lines"),
+      legend.text = element_text(size = 10),
+      legend.title = element_text(size = 11),
+      legend.spacing.y = unit(0.2, "lines")
+    )
+)
+
+info_panel <- inset_map / legend_rg 
+
+# --- combine: three maps in a row + info panel to the right ---
+study_map <- (p_pc1 + p_pc2 + p_hf) + info_panel +
+  plot_layout(ncol = 4, widths = c(1, 1, 1, 0.6), guides = "keep")
+
+study_map
+
+# preview and save (wider canvas so top legends fit)
+study_map
+ggsave("data/study_map.png", study_map, width = 14, height = 5, dpi = 300)
+ggsave("data/study_map.pdf", study_map, width = 14, height = 5, dpi = 300)
+
+```
+
