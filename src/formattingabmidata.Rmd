@@ -859,6 +859,7 @@ ggplot(det_summary, aes(x = PC1), y = detections, color = hf)+
   ) +
   theme_classic(base_size = 14)
 ```
+
 ##ABMI Linear Features
 
 ```{r}
