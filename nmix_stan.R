@@ -1,30 +1,4 @@
-library(vroom)
-library(dplyr)
-library(tidyr)
-library(purrr)
-library(ggplot2)
-library(forcats)
-library(lubridate)
-library(MASS)
-library(hms)
-library(unmarked)
-library(camtrapR)
-library(overlap)
-library(stars)
-library(Rcpp)
-library(stringr)
-library(mgcv)
-library(cowplot)
-library(gridExtra)
-library(ubms)
-library(MCMCvis)
-library(sjPlot)
-library(sjmisc)
-library(ggeffects)
-library(cmdstanr)
-library(rjags)
-library(jagsUI)
-
+##Nmix Analyses 
 
 coyotecounts <- as.matrix(read.csv("data/coyotecounts.csv"))
 coyotecounts_boreal <- as.matrix(read.csv("data/coyotecounts_boreal.csv"))
@@ -38,32 +12,12 @@ redfoxcounts_park <- as.matrix(read.csv("data/redfoxcounts_park.csv"))
 lynxcounts <- as.matrix(read.csv("data/lynxcounts.csv"))
 lynxcounts_boreal <- as.matrix(read.csv("data/lynxcounts_boreal.csv"))
 
-martencounts <- as.matrix(read.csv("data/martencounts.csv"))
-martencounts_boreal <- as.matrix(read.csv("data/martencounts.csv"))
+```{r}
 
-fishercounts <- as.matrix(read.csv("data/fishercounts.csv"))
-fishercounts_boreal <- as.matrix(read.csv("data/fishercounts_boreal.csv"))
+mod <- cmdstan_model(
+  "coyote_nmix.stan"
+)
 
-#Load in covariate data
-covars <- read.csv("data/covars.csv")
-covars_boreal <- read.csv("data/covars_boreal.csv")
-covars_park <- read.csv("data/covars_park.csv")
-
-#Scale data for all covariates
-covars$PC1<-scale(covars$PC1)
-covars$PC2<-scale(covars$PC2)
-covars$hf<-scale(covars$hf)
-covars$baited <- as.numeric(covars$baited)
-
-covars_boreal$PC1<-scale(covars_boreal$PC1)
-covars_boreal$PC2<-scale(covars_boreal$PC2)
-covars_boreal$hf<-scale(covars_boreal$hf)
-covars_boreal$baited <- as.numeric(covars_boreal$baited)
-
-covars_park$PC1<-scale(covars_park$PC1)
-covars_park$PC2<-scale(covars_park$PC2)
-covars_park$hf<-scale(covars_park$hf)
-covars_park$baited <- as.numeric(covars_park$baited)
 
 #Format data
 abund <- as.matrix(coyotecounts)   # cameras × occasions
@@ -113,7 +67,7 @@ for (i in seq_along(sites)) {
   }
 }
 
-#Compile stan data into list
+
 stan_data <- list(
   I       = I,
   J       = J,
@@ -128,6 +82,9 @@ stan_data <- list(
   K        = 100  # or some upper bound for N
 )
 
+```
+
+```{r}
 mod <- cmdstan_model(
   "C:/Users/Gaynor Lab/Documents/abmi_coyotes/coyote_nmix.stan"
 )
@@ -150,3 +107,19 @@ head(stan_data$human_fp)
 stan_data$baited[1, 1:stan_data$J[2]]
 
 stan_data$K
+
+
+fit <- mod$sample(
+  data = stan_data,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 300,
+  iter_sampling = 300,
+  adapt_delta = 0.9,
+  max_treedepth = 12,
+  refresh = 50
+)
+
+fit_test$diagnostic_summary()[, c("variable", "rhat", "ess_bulk", "ess_tail", "divergent__", "treedepth__")]
+
+

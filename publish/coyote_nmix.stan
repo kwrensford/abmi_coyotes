@@ -308,4 +308,26 @@ model {
   }
 }
 
+generated quantities {
+
+  vector[I] log_lambda_site;
+  vector[I] lambda_site;
+
+  for (i in 1:I) {
+
+    log_lambda_site[i] =
+      alpha_lambda
+      + beta_clim1     * clim_pc1[i]
+      + beta_clim2     * clim_pc2[i]
+      + beta_human     * human_fp[i]
+      + beta_interact1 * clim_pc1[i] * human_fp[i]
+      + beta_interact2 * clim_pc2[i] * human_fp[i];
+
+    lambda_site[i] =
+      exp(log_lambda_site[i]);
+
+  }
+
+}
+
 
