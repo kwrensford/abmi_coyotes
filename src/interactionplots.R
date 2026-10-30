@@ -5,31 +5,16 @@ library(dplyr)
 library(tidyr)
 library(purrr)
 library(ggplot2)
-library(forcats)
-library(lubridate)
-library(MASS)
-library(hms)
-library(unmarked)
-library(camtrapR)
-library(overlap)
-library(stars)
-library(Rcpp)
-library(stringr)
-library(mgcv)
 library(cowplot)
 library(gridExtra)
-library(ubms)
-library(MCMCvis)
-library(sjPlot)
-library(sjmisc)
 library(ggeffects)
-library(cmdstanr)
 library(ggimage)
 library(cowplot)
 library(patchwork)
 library(grid)
 library(magick)
 library(tibble)
+library(ggtext)
 
 
 #Load in Model Outputs
@@ -45,6 +30,19 @@ covars <- read.csv("data/covars.csv")
 covars_boreal <- read.csv("data/covars_boreal.csv")
 covars_park <- read.csv("data/covars_park.csv")
 
+#Calculate global limits for PC1 and PC2
+pc1_lim <- range(
+  covars_boreal$PC1,
+  covars_park$PC1,
+  na.rm = TRUE
+)
+
+pc2_lim <- range(
+  covars_boreal$PC2,
+  covars_park$PC2,
+  na.rm = TRUE
+)
+
 ###Predict interaction plot function
 plot_interaction_ubms <- function(model,
                                   focal,
@@ -58,7 +56,9 @@ plot_interaction_ubms <- function(model,
                                   xlab = NULL,
                                   title = NULL,
                                   region = NULL,
-                                  ylim = NULL) {
+                                  ylim = NULL,
+                                  xlim = NULL,
+                                  show_ylab = TRUE) {
   
   library(ggplot2)
   library(colorspace)
@@ -130,16 +130,40 @@ plot_interaction_ubms <- function(model,
   p <- ggplot(df_long, aes(x = cov, y = pred,
                            color = hf_group, fill = hf_group)) +
     geom_ribbon(aes(ymin = lower, ymax = upper),
-                alpha = 0.25, color = NA) +
+                alpha = 0.1, color = NA) +
     geom_line(size = 1) +
     
     scale_color_manual(values = c("Low HF" = col_low, "High HF" = col_high),
                        name = "Human Footprint") +
     scale_fill_manual(values = c("Low HF" = col_low, "High HF" = col_high),
                       name = "Human Footprint") +
-    labs(y = ylab, x = NULL, title = title) +
+    labs(
+      y = if(show_ylab) ylab else NULL,
+      x = NULL,
+      title = title
+    ) +
     theme_classic() +
-    theme(legend.position = "none") 
+    theme(
+      legend.position = "none",
+      
+      axis.title.y =
+        if(show_ylab)
+          element_text()
+      else
+        element_blank(),
+      
+      axis.text.y =
+        if(show_ylab)
+          element_text()
+      else
+        element_blank(),
+      
+      axis.ticks.y =
+        if(show_ylab)
+          element_line()
+      else
+        element_blank()
+    )
   
   # Apply y-limits if provided
   if (!is.null(ylim)) {
@@ -147,6 +171,10 @@ plot_interaction_ubms <- function(model,
   }
   
   p
+  
+  if (!is.null(xlim)) {
+    p <- p + scale_x_continuous(limits = xlim)
+  }
 }
 
 
@@ -199,7 +227,9 @@ plots <- list(
     species = "coyote", data = covars_boreal,
     region = "boreal",
     ylab = "Abundance", xlab = "Climate PC1",
-    title = NULL, ylim = ylim_coyote_boreal
+    title = NULL, ylim = ylim_coyote_boreal,
+    xlim = pc1_lim,
+    show_ylab = TRUE
   ),
   
   coyote_boreal_pc2 = plot_interaction_ubms(
@@ -208,7 +238,9 @@ plots <- list(
     species = "coyote", data = covars_boreal,
     region = "boreal",
     ylab = "Abundance", xlab = "Climate PC2",
-    title = NULL, ylim = ylim_coyote_boreal 
+    title = NULL, ylim = ylim_coyote_boreal ,
+    xlim = pc2_lim,
+    show_ylab = FALSE
   ),
   coyote_park_pc1 = plot_interaction_ubms(
     model = coyote_nmix_ubms_park,
@@ -216,7 +248,9 @@ plots <- list(
     species = "coyote", data = covars_park,
     region = "park",
     ylab = "Abundance", xlab = "Climate PC1",
-    title = NULL, ylim = ylim_coyote_park
+    title = NULL, ylim = ylim_coyote_park,
+    xlim = pc1_lim,
+    show_ylab = TRUE
   ),
   
   coyote_park_pc2 = plot_interaction_ubms(
@@ -225,7 +259,9 @@ plots <- list(
     species = "coyote", data = covars_park,
     region = "park",
     ylab = "Abundance", xlab = "Climate PC2",
-    title = NULL, ylim = ylim_coyote_park
+    title = NULL, ylim = ylim_coyote_park,
+    xlim = pc2_lim,
+    show_ylab = FALSE
   ),
   
   redfox_boreal_pc1 = plot_interaction_ubms(
@@ -234,7 +270,9 @@ plots <- list(
     species = "redfox", data = covars_boreal,
     region = "boreal",
     ylab = "Abundance", xlab = "Climate PC1",
-    title = NULL, ylim = ylim_redfox_boreal
+    title = NULL, ylim = ylim_redfox_boreal,
+    xlim = pc1_lim,
+    show_ylab = TRUE
   ),
   
   redfox_boreal_pc2 = plot_interaction_ubms(
@@ -243,7 +281,9 @@ plots <- list(
     species = "redfox", data = covars_boreal,
     region = "boreal",
     ylab = "Abundance", xlab = "Climate PC2",
-    title = NULL, ylim = ylim_redfox_boreal
+    title = NULL, ylim = ylim_redfox_boreal,
+    xlim = pc2_lim,
+    show_ylab = FALSE
   ),
   
   redfox_park_pc1 = plot_interaction_ubms(
@@ -252,7 +292,9 @@ plots <- list(
     species = "redfox", data = covars_park,
     region = "park",
     ylab = "Abundance", xlab = "Climate PC1",
-    title = NULL, ylim  = ylim_redfox_park
+    title = NULL, ylim  = ylim_redfox_park,
+    xlim = pc1_lim,
+    show_ylab = TRUE
   ),
   
   redfox_park_pc2 = plot_interaction_ubms(
@@ -261,7 +303,10 @@ plots <- list(
     species = "redfox", data = covars_park,
     region = "park",
     ylab = "Abundance", xlab = "Climate PC2",
-    title = NULL, ylim = ylim_redfox_park
+    title = NULL, 
+    ylim = ylim_redfox_park,
+    xlim = pc2_lim,
+    show_ylab = FALSE
   ),
   
   lynx_boreal_pc1 = plot_interaction_ubms(
@@ -270,7 +315,9 @@ plots <- list(
     species = "lynx", data = covars_boreal,
     region = "boreal",
     ylab = "Abundance", xlab = "Climate PC1",
-    title = NULL, ylim = ylim_lynx_boreal
+    title = NULL, ylim = ylim_lynx_boreal,
+    xlim = pc1_lim,
+    show_ylab = TRUE
   ),
   
   lynx_boreal_pc2 = plot_interaction_ubms(
@@ -279,16 +326,11 @@ plots <- list(
     species = "lynx", data = covars_boreal,
     region = "boreal",
     ylab = "Abundance", xlab = "Climate PC2",
-    title = NULL, ylim = ylim_lynx_boreal
+    title = NULL, ylim = ylim_lynx_boreal,
+    xlim = pc2_lim,
+    show_ylab = FALSE
   )
 )
-
-#Function to add species icon
-make_icon_grob <- function(species_name, size = .75) {
-  icon_path <- file.path("data/phylopics", paste0(species_name, ".png"))
-  img <- magick::image_read(icon_path)
-  rasterGrob(img, width = size, height = size)
-}
 
 
 #Create x axis labels
@@ -318,38 +360,70 @@ xlab_pc2 <- ggplot() +
 
 
 
-#Create a left side label strip for each row, comine icon and label vertically
+#Create a left side label strip for each row, combine icon and label vertically
 
-make_row_label <- function(species_name, region_name) {
+make_row_label <- function(species_name,
+                           region_name) {
   
-  icon_path <- file.path("data/phylopics", paste0(species_name, ".png"))
+  region_col <- case_when(
+    region_name == "Boreal/Shield" ~ "#1b9e77",
+    TRUE ~ "#d95f02"
+  )
+  
+  icon_path <- file.path(
+    "data/phylopics",
+    paste0(species_name, ".png")
+  )
+  
+  img <- image_read(icon_path)
+  img <- image_colorize(
+    img,
+    opacity = 100,
+    color = region_col
+  )
   
   icon_panel <- ggplot() +
-    geom_image(aes(x = 0.5, y = 0.5, image = icon_path),
-               size = 1.75,
-               asp = TRUE) +
-    theme(
-      plot.margin = margin(4, 0, 4, 0)
-    ) + 
+    annotation_custom(
+      rasterGrob(img),
+      xmin = .1,
+      xmax = .9,
+      ymin = .25,
+      ymax = 1
+    ) +
+    coord_cartesian(
+      xlim = c(0,1),
+      ylim = c(0,1),
+      clip = "off"
+    ) +
     theme_void()
   
-  species_panel <- ggplot() +
-    annotate("text", x = 0.5, y = 0.5,
-             label = species_name,
-             size = 5, fontface = "bold") +
+  text_panel <- ggplot() +
+    annotate(
+      "text",
+      x = .5,
+      y = .65,
+      label = species_name,
+      fontface = "bold",
+      size = 4.5
+    ) +
+    annotate(
+      "text",
+      x = .5,
+      y = .35,
+      label = region_name,
+      color = region_col,
+      size = 3.8
+    ) +
+    coord_cartesian(
+      xlim = c(0,1),
+      ylim = c(0,1)
+    ) +
     theme_void()
   
-  region_panel <- ggplot() +
-    annotate("text", x = 0.5, y = 0.5,
-             label = region_name,
-             size = 5) +
-    theme_void()
-  
-  # Combine vertically
-  combined <- icon_panel / species_panel / region_panel
-  
-  # rap in fixed-height panel so patchwork doesn't stretch the row
-  wrap_elements(full = combined, clip = TRUE)
+  wrap_elements(
+    full = icon_panel / text_panel,
+    clip = FALSE
+  )
 }
 
 #Combine row label + PC1 + PC2 into a row
@@ -390,62 +464,112 @@ grid <-
 # left strip = narrow, PC1 = wide, PC2 = wide
 grid <- grid + plot_layout(widths = c(1, 3, 3))
 
-#Build region gradient bar legend
+#Build region hf legend
+legend_df <- tibble::tribble(
+  ~region,     ~x_region, ~x1, ~x2,
+  "Boreal",      0.5,      2.0, 3.8,
+  "Parkland",    0.5,      2.0, 3.8
+)
 
-make_hf_bar <- function(region_name, low_col, high_col) {
+make_legend_row <- function(region_name,
+                            low_col,
+                            high_col) {
   
-  grad_df <- tibble(
-    x = seq(0, 1, length.out = 200),
-    y = 1,
-    col = colorRampPalette(c(low_col, high_col))(200)
-  )
-  
-  ggplot(grad_df, aes(x, y, fill = col)) +
-    geom_tile(height = 0.2) +
-    scale_fill_identity() +
+  ggplot() +
     
-    annotate("text", x = 0.5, y = 1.3,
-             label = region_name,
-             size = 4, fontface = "bold") +
+    # Region label
+    annotate(
+      "text",
+      x = 0.3,
+      y = 1,
+      label = region_name,
+      hjust = 0,
+      fontface = "bold",
+      size = 3.8
+    ) +
     
-    annotate("text", x = 0, y = 0.4,
-             label = "Low HF", size = 3.2, hjust = 0) +
-    annotate("text", x = 1, y = 0.4,
-             label = "High HF", size = 3.2, hjust = 1) +
+    # Low HF
+    annotate(
+      "point",
+      x = 2.0,
+      y = 1,
+      colour = low_col,
+      size = 3.5
+    ) +
     
-    coord_cartesian(clip = "off") +
+    annotate(
+      "text",
+      x = 2.25,
+      y = 1,
+      label = "Low HF",
+      hjust = 0,
+      size = 3.2
+    ) +
+    
+    # High HF
+    annotate(
+      "point",
+      x = 3.8,
+      y = 1,
+      colour = high_col,
+      size = 3.5
+    ) +
+    
+    annotate(
+      "text",
+      x = 4.05,
+      y = 1,
+      label = "High HF",
+      hjust = 0,
+      size = 3.2
+    ) +
+    
+    coord_cartesian(
+      xlim = c(0, 5.5),
+      ylim = c(0.8, 1.2),
+      clip = "off"
+    ) +
+    
     theme_void() +
     theme(
-      plot.margin = margin(2, 2, 2, 2)
+      plot.margin = margin(0, 0, 0, 0)
     )
 }
 
-boreal_bar <- make_hf_bar(
-  "Boreal/Shield",
-  lighten(region_colors$boreal, 0.4),
-  darken(region_colors$boreal, 0.4)
+
+legend_boreal <- make_legend_row(
+  "Boreal",
+  lighten("#1b9e77", .4),
+  darken("#1b9e77", .4)
 )
 
-park_bar <- make_hf_bar(
-  "Grassland/Parkland",
-  lighten(region_colors$park, 0.4),
-  darken(region_colors$park, 0.4)
+legend_park <- make_legend_row(
+  "Grassland",
+  lighten("#d95f02", .4),
+  darken("#d95f02", .4)
 )
 
-
-hf_region_legend <- boreal_bar / park_bar
-
-pc_labels_row <- hf_region_legend | xlab_pc1 | xlab_pc2
-
-grid <- grid / pc_labels_row
-
-
+hf_region_legend <-
+  legend_boreal /
+  legend_park +
+  plot_layout(
+    heights = c(1,1)
+  )
 #Combine grid + legend with controlled widths
-grid <- grid + plot_layout(widths = c(1,3,3), 
-                                             heights = c(1,1,1,1, 1, .25))
 
-final <- grid
+top_row <-
+  hf_region_legend |
+  plot_spacer()
+  
 
+final <-
+  top_row /
+  grid /
+  (plot_spacer() | xlab_pc1 | xlab_pc2) +
+  plot_layout(
+    widths = c(0.6, 3, 3),
+    heights = c(0.05, 1, 0.04)
+  )
 
 final
 
