@@ -318,7 +318,7 @@ covariates_fixed <- covariates_fixed %>%
 #Species per region
 
 det_with_region <- study_main_reports %>%
-  left_join(covariates_fixed %>% select(location, region),
+  left_join(covariates_fixed %>% dplyr::select(location, region),
             by = "location")
 
 det_summary <- study_main_reports %>%
@@ -725,7 +725,7 @@ covariates_climate <- covariates_unique %>%
 
 ##Keep location info
 covariates_climate <- covariates_climate %>%
-  filter(region != "Rocky+Foothills")
+  filter(region != "Rocky/Foothills")
 
 covar_locations <- covariates_climate %>%
   dplyr::select(location, Latitude, Longitude, region)
@@ -790,20 +790,15 @@ plot_data <- bind_cols(
 pb <- ggplot_build(pc_plot)
 
 scores_df <- pb$data[[1]] %>% 
-  select(x, y) %>% 
+  dplyr::select(x, y) %>% 
   bind_cols(climate_sites)
 
-# Extract scaled loadings 
-# autoplot always puts loadings in the LAST layer
-loadings_df <- pb$data[[length(pb$data)]]
 
-# Clean up loadings_df
-loadings_df <- loadings_df %>%
-  select(x, y, label)
-
-# Clean up loadings_df
-loadings_df <- loadings_df %>%
-  select(x, y, label)
+loadings_df <- load_df %>%
+  dplyr::rename(
+    x = PC1,
+    y = PC2
+  )
 
 #Compute complex hulls for region polygons
 hulls <- climate_sites %>%
@@ -843,27 +838,11 @@ pc_plot
 ggsave("data/pc_plot.png", pc_plot, width = 8, height = 7)
 ```
 
-```{r}
-det_covars <- left_join(study_main_reports, covars, by = "location")
-
-det_summary <- det_covars %>%
-  count(location, species_common_name, name = "detections")
-
-ggplot(det_summary, aes(x = PC1), y = detections, color = hf)+
-  geom_point(size = 3, alpha = 0.9) +
-  scale_color_viridis(option = "plasma", direction = -1) +
-  labs(
-    x = "Climate PC1",
-    y = "Number of Detections",
-    color = "Human Footprint"
-  ) +
-  theme_classic(base_size = 14)
-```
-
 ##ABMI Linear Features
 
 ```{r}
 linear_abmi <- covariates_unique %>%
+  filter(region != "Rocky/Foothills")%>%
   dplyr::select(location, Latitude, Longitude, TransmissionLine_buf, Pipeline_buf, SeismicLineNarrow_buf, SeismicLineWide_buf)
 
 linear_abmi <- linear_abmi %>%
