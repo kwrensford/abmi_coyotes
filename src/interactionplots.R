@@ -30,6 +30,22 @@ covars <- read.csv("data/covars.csv")
 covars_boreal <- read.csv("data/covars_boreal.csv")
 covars_park <- read.csv("data/covars_park.csv")
 
+#Scale covariates
+covars$PC1<-scale(covars$PC1)
+covars$PC2<-scale(covars$PC2)
+covars$hf<-scale(covars$hf)
+covars$baited <- as.numeric(covars$baited)
+
+covars_boreal$PC1<-scale(covars_boreal$PC1)
+covars_boreal$PC2<-scale(covars_boreal$PC2)
+covars_boreal$hf<-scale(covars_boreal$hf)
+covars_boreal$baited <- as.numeric(covars_boreal$baited)
+
+covars_park$PC1<-scale(covars_park$PC1)
+covars_park$PC2<-scale(covars_park$PC2)
+covars_park$hf<-scale(covars_park$hf)
+covars_park$baited <- as.numeric(covars_park$baited)
+
 #Calculate global limits for PC1 and PC2
 pc1_lim <- range(
   covars_boreal$PC1,
@@ -575,3 +591,4 @@ final
 
 ggsave("interactionplots_abmi.pdf", final, width = 7, height = 12)
 ggsave("interactionplots_abmi.png", final, width = 7, height = 12)
+
