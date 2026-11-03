@@ -14,6 +14,9 @@
 
 library(cmdstanr)
 library(tidyverse)
+library(future)
+library(furrr)
+library(purrr)
 
 source("R/01_nmix_functions.R")
 
@@ -28,6 +31,11 @@ dir.create("output/draws",
 dir.create("output/summaries",
            recursive = TRUE,
            showWarnings = FALSE)
+
+plan(
+  multisession,
+  workers = 5
+)
 
 #------------------------------------------------------------------------------
 # Model registry
@@ -74,14 +82,13 @@ mod <- cmdstan_model(
 )
 
 #------------------------------------------------------------------------------
-# Fit all models
+# Model fitting function
 #------------------------------------------------------------------------------
-
-for(i in seq_len(nrow(model_sets))){
-  
-  species <- model_sets$species[i]
-  
-  region <- model_sets$region[i]
+run_model <- function(species,
+                      region,
+                      count_file,
+                      covar_file,
+                      model){
   
   message(
     "Running ",
@@ -92,14 +99,10 @@ for(i in seq_len(nrow(model_sets))){
   )
   
   counts <- as.matrix(
-    read.csv(
-      model_sets$count_file[i]
-    )
+    read.csv(count_file)
   )
   
-  covars <- read.csv(
-    model_sets$covar_file[i]
-  ) %>%
+  covars <- read.csv(covar_file) %>%
     scale_covariates()
   
   stan_data <- build_stan_data(
@@ -109,21 +112,15 @@ for(i in seq_len(nrow(model_sets))){
   
   fit <- fit_nmix_model(
     stan_data = stan_data,
-    model = mod
+    model = model
   )
   
   model_output <- list(
-    
     species = species,
-    
     region = region,
-    
     stan_data = stan_data,
-    
     fit = fit,
-    
     fit_date = Sys.Date()
-    
   )
   
   saveRDS(
@@ -170,4 +167,26 @@ for(i in seq_len(nrow(model_sets))){
     row.names = FALSE
   )
   
+  invisible(
+    list(
+      species = species,
+      region = region
+    )
+  )
 }
+#------------------------------------------------------------------------------
+# Fit all models
+#------------------------------------------------------------------------------
+safe_run_model <- purrr::safely(run_model)
+
+results <- future_pmap(
+  list(
+    species = model_sets$species,
+    region = model_sets$region,
+    count_file = model_sets$count_file,
+    covar_file = model_sets$covar_file
+  ),
+  safe_run_model,
+  model = mod,
+  .options = furrr_options(seed = TRUE)
+)

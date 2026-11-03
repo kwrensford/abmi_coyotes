@@ -174,9 +174,9 @@ fit_nmix_model <- function(stan_data,
     
     parallel_chains = 4,
     
-    iter_warmup = 2000,
+    iter_warmup = 5000,
     
-    iter_sampling = 20000,
+    iter_sampling = 15000,
     
     adapt_delta = 0.95,
     
