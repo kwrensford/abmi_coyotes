@@ -18,7 +18,7 @@ library(future)
 library(furrr)
 library(purrr)
 
-source("R/01_nmix_functions.R")
+source("publish/scripts/01_nmix_functions.R")
 
 dir.create("output/fits",
            recursive = TRUE,
