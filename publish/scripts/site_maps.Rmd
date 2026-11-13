@@ -47,6 +47,8 @@ library(ggplotify)
 
 ##Load in covariate dataset with lat and long
 ```{r}
+
+
 covars <- read.csv("data/covars.csv")
 
 covars_sf <- st_as_sf(
@@ -157,7 +159,7 @@ st_bbox(region_groups)
 p_pc1 <- ggplot() +
   geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
   geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
-  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#FED7B8", "Boreal/Shield" = "#C2F5E5")) +
   geom_sf(data = covars_sf, aes(color = PC1), size = 1, alpha = 0.9) +
   scale_color_viridis_c(option = "viridis", name = "Climate PC1\n(Overall Climate)",
                        guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
@@ -179,7 +181,7 @@ p_pc1 <- ggplot() +
 p_pc2 <- ggplot() +
   geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
   geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
-  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#FED7B8", "Boreal/Shield" = "#C2F5E5")) +
   geom_sf(data = covars_sf, aes(color = PC2), size = 1, alpha = 0.9) +
   scale_color_viridis_c(option = "viridis", name = "Climate PC2\n(Aridity)",
                        guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
@@ -200,7 +202,7 @@ p_pc2 <- ggplot() +
 p_hf <- ggplot() +
   geom_sf(data = alberta, fill = "grey90", color = "black", linewidth = 0.5) +
   geom_sf(data = region_groups, aes(fill = region_group), alpha = 0.5, color = "black", linewidth = 0.5) +
-  scale_fill_manual(values = c("Grassland/Parkland" = "#E0C9A8", "Boreal/Shield" = "#A2B9A3")) +
+  scale_fill_manual(values = c("Grassland/Parkland" = "#FED7B8", "Boreal/Shield" = "#C2F5E5")) +
   geom_sf(data = covars_sf, aes(color = hf), size = 1, alpha = 0.9) +
   scale_color_viridis_c(option = "viridis", name = "Human Footprint",
                        guide = guide_colorbar(title.position = "top", title.hjust = 0.5,
@@ -252,8 +254,8 @@ legend_rg <- cowplot::get_legend(
             color = NA) +
     scale_fill_manual(
       values = c(
-        "Grassland/Parkland" = "#E0C9A8",
-        "Boreal/Shield"      = "#A2B9A3"
+        "Grassland/Parkland" = "#FED7B8",
+        "Boreal/Shield"      = "#C2F5E5"
       ),
       name = "Region"
     ) +

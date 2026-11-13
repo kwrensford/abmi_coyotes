@@ -481,7 +481,7 @@ make_matrices <- function(det_df,
                           region = NULL,
                           occasion_length = 7,
                           day1 = "station",
-                          tz = "America/Edmonton") {
+                          tz = "MST7MDT") {
   
   #------------------------------------------------------------
   # 1. Filter detections by species (but do NOT drop stations)
@@ -726,6 +726,8 @@ covariates_climate <- covariates_unique %>%
 ##Keep location info
 covariates_climate <- covariates_climate %>%
   filter(region != "Rocky/Foothills")
+
+write.csv(covariates_climate, file = "data/pcacovars.csv")
 
 covar_locations <- covariates_climate %>%
   dplyr::select(location, Latitude, Longitude, region)
