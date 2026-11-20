@@ -17,9 +17,9 @@ extract_posteriors <- function(file,
       Variable = recode(
         variable,
         
-        beta_clim1     = "PC1",
-        beta_clim2     = "PC2",
-        beta_human     = "hf",
+        beta_clim1     = "Overall Climate (PC1)",
+        beta_clim2     = "Aridity (PC2)",
+        beta_human     = "Human footprint (hf)",
         beta_interact1 = "PC1:hf",
         beta_interact2 = "hf:PC2"
       ),
@@ -83,9 +83,9 @@ all_estimates <- all_estimates %>%
     Variable = factor(
       Variable,
       levels = rev(c(
-        "PC1",
-        "PC2",
-        "hf",
+        "Overall Climate (PC1)",
+        "Aridity (PC2)",
+        "Human footprint (hf)",
         "PC1:hf",
         "hf:PC2"
       ))
